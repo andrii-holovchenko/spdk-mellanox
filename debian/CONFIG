@@ -220,5 +220,5 @@ CONFIG_SMA=n
 CONFIG_AVAHI=n
 
 # Build with libxlio suport.
-CONFIG_XLIO=y
+CONFIG_XLIO=n
 CONFIG_XLIO_DIR=
