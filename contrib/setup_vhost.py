@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/env python2
 from __future__ import print_function
 import sys
 import os
@@ -26,7 +26,7 @@ if has_iommu:
     if not vfio_pci_loaded:
         os.system('/sbin/modprobe -v vfio_pci')
     if os.path.exists('/sys/bus/pci/drivers/vfio-pci'):
-        stub_driver = 'vfio-pci' 
+        stub_driver = 'vfio-pci'
 # stub_driver = 'uio_pci_generic'
 # has_iommu = False
 

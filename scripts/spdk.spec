@@ -23,19 +23,21 @@ Source0:        spdk-%{version}.tar.gz
 %define install_bindir %{buildroot}/%{_bindir}
 %define install_docdir %{buildroot}/%{_docdir}/%{name}
 
-# It is somewhat hard to get SPDK RPC working with python 2.7
-# Distros that don't support python3 will use python2
+%define use_python python3
+%define python_ver 3.7
+
 %if 0%{?rhel} >= 7
 # So, let's switch to Python36 from IUS repo - https://github.com/iusrepo/python36
 %define use_python python3.6
 %define python_ver 3.6
-%else
-# on Fedora 28+ we have python3 == 3.7
-%define use_python python3
-%define python_ver 3.7
+%endif
+
+%if %{defined ctyunos}
+%define python_ver 3.9
+%endif
+
 %ifarch x86_64
 BuildRequires:  clang-analyzer
-%endif
 %endif
 
 ExclusiveArch: x86_64 aarch64
@@ -87,7 +89,7 @@ Requires: %{name}%{?_isa} = %{package_version} python36
 Requires: %{name}%{?_isa} = %{package_version} python3 python3-pexpect
 %endif
 
-%if 0%{?rhel} > 7 || %{defined openEuler}
+%if 0%{?rhel} > 7 || %{defined openEuler} || %{defined ctyunos}
 Requires: python3-configshell
 BuildRequires: python3-configshell
 %endif
