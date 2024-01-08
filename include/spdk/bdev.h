@@ -42,6 +42,7 @@ enum spdk_bdev_event_type {
 	SPDK_BDEV_EVENT_REMOVE,
 	SPDK_BDEV_EVENT_RESIZE,
 	SPDK_BDEV_EVENT_MEDIA_MANAGEMENT,
+	SPDK_BDEV_EVENT_IO_CHANNEL_WEIGHT_CHANGE,
 };
 
 /** Media management event details */
@@ -377,10 +378,11 @@ struct spdk_bdev *spdk_bdev_next_leaf(struct spdk_bdev *prev);
  * \param bdev_name Block device name to open.
  * \param write true is read/write access requested, false if read-only
  * \param event_cb notification callback to be called when the bdev triggers
- * asynchronous event such as bdev removal. This will always be called on the
- * same thread that spdk_bdev_open_ext() was called on. In case of removal event
- * the descriptor will have to be manually closed to make the bdev unregister
- * proceed.
+ * asynchronous event such as bdev removal. For almost all event types, this will always
+ * be called on the same thread that spdk_bdev_open_ext() was called on. In case of
+ * removal event the descriptor will have to be manually closed to make the bdev
+ * unregister proceed. However, SPDK_BDEV_EVENT_IO_CHANNEL_WEIGHT_CHANGE is an exception,
+ * and it will always be called on the thread when the weight of an I/O channel is changed.
  * \param event_ctx param for event_cb.
  * \param desc output parameter for the descriptor when operation is successful
  * \return 0 if operation is successful, suitable errno value otherwise
@@ -846,6 +848,15 @@ uint64_t spdk_bdev_get_weighted_io_time(const struct spdk_bdev *bdev);
  * \return A handle to the I/O channel or NULL on failure.
  */
 struct spdk_io_channel *spdk_bdev_get_io_channel(struct spdk_bdev_desc *desc);
+
+/**
+ * Obtain the current weight of an I/O channel.
+ *
+ * \param ch I/O channel to query.
+ *
+ * \return The weight of this I/O channel.
+ */
+uint32_t spdk_bdev_io_channel_get_weight(struct spdk_io_channel *ch);
 
 /**
  * Obtain a bdev module context for the block device opened by the specified

@@ -4394,6 +4394,20 @@ spdk_bdev_get_io_channel(struct spdk_bdev_desc *desc)
 	return spdk_get_io_channel(__bdev_to_io_dev(spdk_bdev_desc_get_bdev(desc)));
 }
 
+uint32_t
+spdk_bdev_io_channel_get_weight(struct spdk_io_channel *ch)
+{
+	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(ch);
+	struct spdk_io_channel *_ch = bdev_ch->channel;
+	struct spdk_bdev *bdev = bdev_ch->bdev;
+
+	if (bdev->fn_table->io_channel_get_weight != NULL) {
+		return bdev->fn_table->io_channel_get_weight(_ch);
+	}
+
+	return 0;
+}
+
 void *
 spdk_bdev_get_module_ctx(struct spdk_bdev_desc *desc)
 {
@@ -4846,6 +4860,34 @@ spdk_bdev_notify_blockcnt_change(struct spdk_bdev *bdev, uint64_t size)
 	spdk_spin_unlock(&bdev->internal.spinlock);
 
 	return ret;
+}
+
+static void
+_io_channel_weight_change_notify(void *arg)
+{
+	struct spdk_bdev_desc *desc = arg;
+
+	_event_notify(desc, SPDK_BDEV_EVENT_IO_CHANNEL_WEIGHT_CHANGE);
+}
+
+int
+spdk_bdev_notify_io_channel_weight_change(struct spdk_bdev *bdev)
+{
+	struct spdk_bdev_desc *desc;
+
+	spdk_spin_lock(&bdev->internal.spinlock);
+	TAILQ_FOREACH(desc, &bdev->internal.open_descs, link) {
+		spdk_spin_lock(&desc->spinlock);
+		if (!desc->closed) {
+			desc->refs++;
+			spdk_thread_send_msg(spdk_get_thread(),
+					     _io_channel_weight_change_notify, desc);
+		}
+		spdk_spin_unlock(&desc->spinlock);
+	}
+	spdk_spin_unlock(&bdev->internal.spinlock);
+
+	return 0;
 }
 
 /*

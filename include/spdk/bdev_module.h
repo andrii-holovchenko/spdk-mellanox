@@ -375,6 +375,11 @@ struct spdk_bdev_fn_table {
 	 */
 	int (*wait_for_ready)(void *ctx, int64_t timeout_in_msec,
 			      spdk_bdev_wait_for_ready_cb, void *cb_arg);
+
+	/**
+	 * Return the current weight of an I/O channel.
+	 */
+	uint32_t (*io_channel_get_weight)(struct spdk_io_channel *ch);
 };
 
 /** bdev I/O completion status */
@@ -1383,6 +1388,15 @@ uint64_t spdk_bdev_io_get_submit_tsc(struct spdk_bdev_io *bdev_io);
  * \return 0 on success, negated errno on failure.
  */
 int spdk_bdev_notify_blockcnt_change(struct spdk_bdev *bdev, uint64_t size);
+
+/**
+ * Notify an event that the weight of an I/O channel was changed for a bdev
+ * to the upper layer.
+ *
+ * \param bdev Block device for which the weight of an I/O channel was changed.
+ * \return 0 on success, negated errno on failure.
+ */
+int spdk_bdev_notify_io_channel_weight_change(struct spdk_bdev *bdev);
 
 /**
  * Translates NVMe status codes to SCSI status information.
