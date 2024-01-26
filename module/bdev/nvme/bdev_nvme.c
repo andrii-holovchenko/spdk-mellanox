@@ -1784,22 +1784,27 @@ err:
 	return rc;
 }
 
+static void bdev_nvme_reset_io_continue(void *cb_arg, int rc);
+
 static void
 bdev_nvme_complete_pending_resets(struct spdk_io_channel_iter *i)
 {
 	struct spdk_io_channel *_ch = spdk_io_channel_iter_get_channel(i);
 	struct nvme_ctrlr_channel *ctrlr_ch = spdk_io_channel_get_ctx(_ch);
-	enum spdk_bdev_io_status status = SPDK_BDEV_IO_STATUS_SUCCESS;
+	int rc = 0;
 	struct spdk_bdev_io *bdev_io;
+	struct nvme_bdev_io *bio;
 
 	if (spdk_io_channel_iter_get_ctx(i) != NULL) {
-		status = SPDK_BDEV_IO_STATUS_FAILED;
+		rc = -1;
 	}
 
 	while (!TAILQ_EMPTY(&ctrlr_ch->pending_resets)) {
 		bdev_io = TAILQ_FIRST(&ctrlr_ch->pending_resets);
 		TAILQ_REMOVE(&ctrlr_ch->pending_resets, bdev_io, module_link);
-		__bdev_nvme_io_complete(bdev_io, status, NULL);
+
+		bio = (struct nvme_bdev_io *)bdev_io->driver_ctx;
+		bdev_nvme_reset_io_continue(bio, rc);
 	}
 
 	spdk_for_each_channel_continue(i, 0);
@@ -2785,10 +2790,14 @@ _bdev_nvme_reset_io(struct nvme_io_path *io_path, struct nvme_bdev_io *bio)
 
 	rc = nvme_ctrlr_op(io_path->qpair->ctrlr, NVME_CTRLR_OP_RESET,
 			   bdev_nvme_reset_io_continue, bio);
-	if (rc == 0) {
-		assert(bio->io_path == NULL);
-		bio->io_path = io_path;
-	} else if (rc == -EBUSY) {
+	if (rc != 0 && rc != -EBUSY) {
+		return rc;
+	}
+
+	assert(bio->io_path == NULL);
+	bio->io_path = io_path;
+
+	if (rc == -EBUSY) {
 		ctrlr_ch = io_path->qpair->ctrlr_ch;
 		assert(ctrlr_ch != NULL);
 		/*
@@ -2798,10 +2807,9 @@ _bdev_nvme_reset_io(struct nvme_io_path *io_path, struct nvme_bdev_io *bio)
 		 */
 		bdev_io = spdk_bdev_io_from_ctx(bio);
 		TAILQ_INSERT_TAIL(&ctrlr_ch->pending_resets, bdev_io, module_link);
-		rc = 0;
 	}
 
-	return rc;
+	return 0;
 }
 
 static void
@@ -2819,7 +2827,9 @@ bdev_nvme_reset_io(struct nvme_bdev_channel *nbdev_ch, struct nvme_bdev_io *bio)
 	rc = _bdev_nvme_reset_io(io_path, bio);
 	if (rc != 0) {
 		/* If the current nvme_ctrlr is disabled, skip it and move to the next nvme_ctrlr. */
-		bdev_nvme_reset_io_continue(bio, rc == -EALREADY);
+		rc = (rc == -EALREADY) ? 0 : rc;
+
+		bdev_nvme_reset_io_continue(bio, rc);
 	}
 }
 
