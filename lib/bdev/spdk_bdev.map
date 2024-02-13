@@ -23,6 +23,7 @@
 	spdk_bdev_desc_get_bdev;
 	spdk_bdev_set_timeout;
 	spdk_bdev_io_type_supported;
+	spdk_bdev_event_type_supported;
 	spdk_bdev_dump_info_json;
 	spdk_bdev_get_name;
 	spdk_bdev_get_product_name;

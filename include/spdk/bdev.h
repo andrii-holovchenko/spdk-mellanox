@@ -524,6 +524,16 @@ int spdk_bdev_set_timeout(struct spdk_bdev_desc *desc, uint64_t timeout_in_sec,
 bool spdk_bdev_io_type_supported(struct spdk_bdev *bdev, enum spdk_bdev_io_type io_type);
 
 /**
+ * Check whether the block device supports the asynchronous event type.
+ *
+ * \param bdev Block device to check.
+ * \param event_type The specific asynchronous event type like remove, resize.
+ * \return true if support, false otherwise.
+ */
+bool spdk_bdev_event_type_supported(struct spdk_bdev *bdev,
+				    enum spdk_bdev_event_type event_type);
+
+/**
  * Output driver-specific information to a JSON stream.
  *
  * The JSON write context will be initialized with an open object, so the bdev

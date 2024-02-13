@@ -3455,6 +3455,21 @@ spdk_bdev_io_type_supported(struct spdk_bdev *bdev, enum spdk_bdev_io_type io_ty
 	return supported;
 }
 
+bool
+spdk_bdev_event_type_supported(struct spdk_bdev *bdev, enum spdk_bdev_event_type event_type)
+{
+	switch (event_type) {
+	case SPDK_BDEV_EVENT_REMOVE:
+	case SPDK_BDEV_EVENT_RESIZE:
+		return true;
+	default:
+		if (bdev->fn_table->event_type_supported != NULL) {
+			return bdev->fn_table->event_type_supported(bdev->ctxt, event_type);
+		}
+		return false;
+	}
+}
+
 uint64_t
 spdk_bdev_io_get_submit_tsc(struct spdk_bdev_io *bdev_io)
 {

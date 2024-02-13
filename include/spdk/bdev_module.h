@@ -380,6 +380,9 @@ struct spdk_bdev_fn_table {
 	 * Return the current weight of an I/O channel.
 	 */
 	uint32_t (*io_channel_get_weight)(struct spdk_io_channel *ch);
+
+	/** Check if the block device supports a specific asynchronous event type. */
+	bool (*event_type_supported)(void *ctx, enum spdk_bdev_event_type type);
 };
 
 /** bdev I/O completion status */
