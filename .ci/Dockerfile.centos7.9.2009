@@ -38,7 +38,8 @@ RUN yum install -y \
     devtoolset-8-gcc \
     devtoolset-8-gcc-c++ \
     cmake3 \
-    pkgconfig autoconf automake libtool
+    pkgconfig autoconf automake libtool \
+    fuse3-devel patchelf
 
 # INSTALL OPENSSL 1.1.1 (needed by SPDK >= 23.01)
 RUN set -eux; \

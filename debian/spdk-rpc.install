@@ -1,3 +1,4 @@
+usr/bin/spdk_iostat.py usr/bin
 usr/bin/spdk_rpc.py usr/bin
 usr/bin/spdkcli usr/bin
 usr/bin/spdk_rpc_http_proxy.py usr/bin

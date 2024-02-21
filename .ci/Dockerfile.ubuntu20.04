@@ -32,8 +32,10 @@ RUN apt-get update && \
       patchelf \
       python3-pyelftools \
       python3-requests \
+      python3-pip \
       linux-headers-generic \
-      pkg-config nasm
+      pkg-config nasm \
+      libnuma-dev
 
 RUN echo "deb [trusted=yes] http://swx-repos.mtr.labs.mlnx:8081/repository/liburing-focal-apt/ focal main" > /etc/apt/sources.list.d/liburing.list && \
     apt update && apt install -y liburing-dev

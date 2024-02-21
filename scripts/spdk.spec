@@ -1,4 +1,4 @@
-%define scm_version 23.01.5
+%define scm_version 24.01.1
 %define unmangled_version %{scm_version}
 %define scm_rev %{_rev}
 Epoch: 0
@@ -59,7 +59,7 @@ BuildRequires: libiscsi-devel
 # SPDK build dependencies
 BuildRequires:	make gcc gcc-c++
 BuildRequires:	CUnit-devel, libaio-devel, openssl-devel, libuuid-devel 
-BuildRequires:	libiscsi-devel
+BuildRequires:	libiscsi-devel, fuse3-devel
 
 %if 0%{?rhel} >= 8
 # Starting from rhel 8 package name git-core
@@ -122,7 +122,6 @@ export LDFLAGS
         --disable-unit-tests \
         --without-fio \
         --with-vhost \
-        --without-pmdk \
         --without-rbd \
         --with-rdma=mlx5_dv \
         --without-vtune \
@@ -142,8 +141,9 @@ install -p -m 755 build/bin/spdk_trace %{install_bindir}
 install -p -m 755 build/bin/spdk_lspci %{install_bindir}
 install -p -m 755 build/bin/spdk_trace_record %{install_bindir}
 install -p -m 755 build/bin/spdk_top %{install_bindir}
-install -p -m 755 build/examples/perf %{install_sbindir}/nvme-perf
-install -p -m 755 build/examples/identify %{install_sbindir}/nvme-identify
+install -p -m 755 build/bin/spdk_nvme_perf %{install_sbindir}
+install -p -m 755 build/bin/spdk_nvme_identify %{install_sbindir}
+install -p -m 755 build/bin/spdk_nvme_discover %{install_sbindir}
 install -p -m 755 build/examples/nvme_manage %{install_sbindir}/
 install -p -m 755 build/examples/blobcli %{install_sbindir}/
 install -p -m 755 contrib/setup_nvmf_tgt.py %{install_sbindir}
@@ -168,8 +168,8 @@ rm -rf ${RPM_BUILD_ROOT}%{pkg_prefix}/share/dpdk/examples
 cp -pr include/spdk ${RPM_BUILD_ROOT}%{pkg_prefix}/include/
 cp -pr build/lib/*.*    ${RPM_BUILD_ROOT}%{pkg_prefix}/lib/
 %ifarch aarch64
-cp -p isa-l/.libs/libisal.a ${RPM_BUILD_ROOT}%{pkg_prefix}/lib/
-cp -p isa-l-crypto/.libs/libisal_crypto.a ${RPM_BUILD_ROOT}%{pkg_prefix}/lib/
+cp -p isa-l/.libs/libisal.* ${RPM_BUILD_ROOT}%{pkg_prefix}/lib/
+cp -p isa-l-crypto/.libs/libisal_crypto.* ${RPM_BUILD_ROOT}%{pkg_prefix}/lib/
 %endif
 install -p -m 644 contrib/spdk_tgt.service ${systemd_dir}
 install -p -m 644 contrib/vhost.service ${systemd_dir}
@@ -180,6 +180,7 @@ install -p -m 644 contrib/vhost.conf.example %{buildroot}%{_sysconfdir}/spdk/
 # Install SPDK rpc services
 mkdir -p %{buildroot}/%{_libdir}/python%{python_ver}/site-packages
 cp -a python/spdk %{buildroot}/%{_libdir}/python%{python_ver}/site-packages
+install -p -m 755 scripts/iostat.py %{install_bindir}/spdk_iostat.py
 install -p -m 755 scripts/rpc.py %{install_bindir}/spdk_rpc.py
 install -p -m 755 scripts/rpc_http_proxy.py %{install_bindir}/spdk_rpc_http_proxy.py
 install -p -m 755 scripts/spdkcli.py %{install_bindir}/spdkcli
@@ -199,7 +200,8 @@ sed -i -e 's/ rpc.py/ spdk_rpc.py/' %{buildroot}%{_sysconfdir}/bash_completion.d
 %{_sysconfdir}/bash_completion.d/*
 %doc README.md LICENSE
 # %files -n dev
-%{pkg_prefix}/*
+%{pkg_prefix}/lib/*
+%{pkg_prefix}/include/*
 
 %post
 systemctl_reload() {
@@ -222,6 +224,9 @@ esac
 %changelog
 * %{_date} Andrii Holovchenko <andriih@nvidia.com>
 - build from %{_branch} (sha1 %{_sha1})
+
+* Wed Feb 21 2024 Andrii Holovchenko <andriih@nvidia.com>
+- Ported to v24.01.1 release
 
 * Wed Sep 20 2023 Andrii Holovchenko <andriih@nvidia.com>
 - Ported to v23.01.5 release

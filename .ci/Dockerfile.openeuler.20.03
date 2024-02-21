@@ -41,7 +41,10 @@ RUN yum install -y \
     python3-pip \
     python3-configshell \
     bc \
-    pkgconfig autoconf automake libtool
+    pkgconfig autoconf automake libtool \
+    fuse3-devel
+
+RUN pip3 install patchelf
 
 RUN set -eux; \
     echo -e "[mlnx_ofed]\n\

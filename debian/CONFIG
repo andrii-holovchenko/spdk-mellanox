@@ -1,7 +1,7 @@
 #  SPDX-License-Identifier: BSD-3-Clause
 #  Copyright (C) 2015 Intel Corporation.
 #  All rights reserved.
-#  Copyright (c) 2021, 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#  Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #  Copyright (c) 2022 Dell Inc, or its subsidiaries.
 #
 
@@ -33,6 +33,9 @@ CONFIG_PGO_CAPTURE=n
 
 # Use profile guided optimization data.
 CONFIG_PGO_USE=n
+
+# Place profile data in this directory
+CONFIG_PGO_DIR=
 
 # Build with code coverage instrumentation.
 CONFIG_COVERAGE=n
@@ -126,10 +129,6 @@ CONFIG_VIRTIO=y
 CONFIG_VFIO_USER=n
 CONFIG_VFIO_USER_DIR=
 
-# Build with PMDK backends
-CONFIG_PMDK=n
-CONFIG_PMDK_DIR=
-
 # Build with xNVMe
 CONFIG_XNVME=n
 
@@ -204,11 +203,17 @@ CONFIG_IDXD_KERNEL=n
 # arc4random is available in stdlib.h
 CONFIG_HAVE_ARC4RANDOM=n
 
+# uuid_generate_sha1 is available in uuid/uuid.h
+CONFIG_HAVE_UUID_GENERATE_SHA1=n
+
 # Is DPDK using libbsd?
 CONFIG_HAVE_LIBBSD=n
 
 # Is DPDK using libarchive?
 CONFIG_HAVE_LIBARCHIVE=n
+
+# execinfo.h is available
+CONFIG_HAVE_EXECINFO_H=n
 
 # Path to IPSEC_MB used by DPDK
 CONFIG_IPSEC_MB_DIR=
@@ -218,6 +223,12 @@ CONFIG_SMA=n
 
 # Build with Avahi support
 CONFIG_AVAHI=n
+
+# Setup DPDK's RTE_MAX_LCORES
+CONFIG_MAX_LCORES=
+
+# Build all Go components
+CONFIG_GOLANG=n
 
 # Build with libxlio suport.
 CONFIG_XLIO=n

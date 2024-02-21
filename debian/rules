@@ -11,8 +11,8 @@ ARCH := $(shell uname -m)
 OS := $(shell lsb_release -si)
 
 CONF_OPTS = --prefix=$(pkg_prefix) --disable-tests --disable-unit-tests --with-crypto
-CONF_OPTS += --without-fio --with-vhost --without-pmdk --without-rbd --with-rdma=mlx5_dv
-CONF_OPTS += --without-vtune --with-iscsi-initiator --with-shared --with-uring --with-raid5f
+CONF_OPTS += --without-fio --with-vhost --without-rbd --with-rdma=mlx5_dv
+CONF_OPTS += --without-vtune --with-iscsi-initiator --with-shared --without-uring --with-raid5f
 
 ifeq ($(OS), Ubuntu)
   CONF_OPTS += --with-xlio
@@ -48,17 +48,13 @@ override_dh_auto_install:
 	mkdir -p debian/tmp$(pkg_prefix)
 	mkdir -p debian/tmp$(install_datadir)/scripts
 	mkdir -p debian/tmp$(install_datadir)/include/spdk
-	install -p -m 755 build/bin/spdk_tgt debian/tmp/usr/sbin
-	install -p -m 755 build/bin/vhost debian/tmp/usr/sbin
-	install -p -m 755 build/bin/iscsi_tgt debian/tmp/usr/sbin
-	install -p -m 755 build/bin/spdk_trace debian/tmp/usr/bin
-	install -p -m 755 build/bin/spdk_lspci debian/tmp/usr/bin
-	install -p -m 755 build/bin/spdk_trace_record debian/tmp/usr/bin
-	install -p -m 755 build/bin/spdk_top debian/tmp/usr/bin
-	install -p -m 755 build/examples/perf debian/tmp/usr/sbin/nvme-perf
-	install -p -m 755 build/examples/identify debian/tmp/usr/sbin/nvme-identify
-	install -p -m 755 build/examples/nvme_manage debian/tmp/usr/sbin/
-	install -p -m 755 build/examples/blobcli debian/tmp/usr/sbin/
+	dh_auto_install -- prefix=$(pkg_prefix)
+	rm -f debian/tmp$(pkg_prefix)/bin/*.py
+	rm -f debian/tmp$(pkg_prefix)/bin/igzip
+	rm -f debian/tmp$(pkg_prefix)/bin/spdk_cli
+	rm -f debian/tmp$(pkg_prefix)/bin/spdk_rpc
+	install -p -m 755 debian/tmp$(pkg_prefix)/bin/* debian/tmp/usr/sbin
+	patchelf --set-rpath $(pkg_prefix)/lib --force-rpath debian/tmp/usr/sbin/*
 	install -p -m 755 contrib/setup_nvmf_tgt.py debian/tmp/usr/sbin
 	install -p -m 755 contrib/setup_vhost.py debian/tmp/usr/sbin
 	install -p -m 755 contrib/vhost_add_config.sh debian/tmp/usr/sbin
@@ -74,15 +70,10 @@ override_dh_auto_install:
 	install -m 644 include/spdk/pci_ids.h debian/tmp$(install_datadir)/include/spdk
 	install -p -m 644 scripts/bash-completion/spdk debian/tmp/etc/bash_completion.d
 	sed -i -e 's/ rpc.py/ spdk_rpc.py/' debian/tmp/etc/bash_completion.d/spdk
-	cp -pvr dpdk/build/lib debian/tmp$(pkg_prefix)
-	cp -pvr dpdk/build/include debian/tmp$(pkg_prefix)
-	install -p -m 644 isa-l/.libs/libisal.a debian/tmp$(pkg_prefix)/lib
-	install -p -m 644 isa-l-crypto/.libs/libisal_crypto.a debian/tmp$(pkg_prefix)/lib
-	#make -C dpdk install prefix=../debian/tmp$(pkg_prefix)
-	#chrpath -r $(pkg_prefix)/lib debian/tmp$(pkg_prefix)/lib/lib*so.*
-	patchelf --set-rpath $(pkg_prefix)/lib --force-rpath debian/tmp$(pkg_prefix)/lib/lib*so.*
+	for so in debian/tmp$(pkg_prefix)/lib/lib*so.*; do \
+		patchelf --set-rpath /opt/mellanox/spdk/lib --force-rpath $$so || true; \
+	done
 	rm -rf debian/tmp$(pkg_prefix)/share/dpdk/examples
-	dh_auto_install -- prefix=$(pkg_prefix)
 	(cd scripts ; python3 setup.py install --install-layout=deb --root=../debian/tmp )
 	mv debian/tmp/usr/bin/spdkcli.py debian/tmp/usr/bin/spdkcli
 

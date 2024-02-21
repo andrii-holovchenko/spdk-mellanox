@@ -34,7 +34,8 @@ RUN yum install --enablerepo=powertools -y \
     meson \
     python3-pip \
     python3-configshell \
-    pkgconfig autoconf automake libtool
+    pkgconfig autoconf automake libtool \
+    fuse3-devel patchelf
 
 RUN set -eux; \
     echo -e "[mlnx_ofed]\n\

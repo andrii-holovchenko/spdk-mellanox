@@ -214,10 +214,17 @@ MAKE_PID := $(shell echo $$PPID)
 endif
 
 MAKE_NUMJOBS := $(shell ps T | sed -nE 's/[[:space:]]*$(MAKE_PID)[[:space:]].* (-j|--jobs=)( *[0-9]+).*/\1\2/p')
+MESON_VER := $(shell meson --version)
 
 all: $(SPDK_ROOT_DIR)/dpdk/build-tmp
-	$(Q)# DPDK doesn't handle nested make calls, so unset MAKEFLAGS
-	$(Q)env -u MAKEFLAGS meson compile -C $(SPDK_ROOT_DIR)/dpdk/build-tmp
+	$(Q) \
+	# DPDK doesn't handle nested make calls, so unset MAKEFLAGS. \
+	# meson doesn't support compile option in versions < 0.61.2
+	$(Q)if [ "$(MESON_VER)" \< "0.61.2" ]; then \
+		env -u MAKEFLAGS ninja -C $(SPDK_ROOT_DIR)/dpdk/build-tmp; \
+	else \
+		env -u MAKEFLAGS meson compile -C $(SPDK_ROOT_DIR)/dpdk/build-tmp; \
+	fi
 	$(Q) \
 	# Meson on FreeBSD sometimes appends --prefix value to the default DESTDIR (which is e.g. \
 	# /usr/local) instead of replacing it. --prefix needs to be an absolute path, so we set \

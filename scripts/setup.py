@@ -5,15 +5,17 @@ import os.path
 import shutil
 long_description = 'Storage Performance Development Kit'
 
-# I would like to rename rpc.py in the git repo. But
-for fname in ['rpc.py', 'rpc_http_proxy.py']:
+# I would like to rename rpc.py in the git repo.
+for fname in ['rpc.py',
+              'rpc_http_proxy.py',
+              'iostat.py']:
     if not os.path.exists('spdk_{}'.format(fname)):
         shutil.copy('{}'.format(fname), 'spdk_{}'.format(fname))
 if not os.path.exists('spdk'):
     shutil.copytree('../python/spdk', 'spdk')
 setup(
     name='spdk-rpc',
-    version='23.01.5',
+    version='24.01.1',
     author='SPDK Mailing List',
     author_email='spdk@lists.01.org',
     description='SPDK RPC modules',
@@ -28,7 +30,7 @@ setup(
     scripts=[
         'spdk_rpc.py',
         'spdkcli.py',
-        'iostat.py',
+        'spdk_iostat.py',
         'spdk_rpc_http_proxy.py'
     ],
     data_files=[

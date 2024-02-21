@@ -32,15 +32,28 @@ RUN apt-get update && \
       patchelf \
       python3-pyelftools \
       python3-requests \
+      python3-pip \
       liburing-dev \
       linux-headers-generic \
-      pkg-config nasm
+      pkg-config nasm \
+      libnuma-dev
 
 RUN wget -qO - https://www.mellanox.com/downloads/ofed/RPM-GPG-KEY-Mellanox | \
     sudo apt-key add - && \
     echo "deb [trusted=yes] http://webrepo.mtr.labs.mlnx/mswg/release/MLNX_OFED/MLNX_OFED_LINUX-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-ubuntu22.04-$(dpkg-architecture -qDEB_HOST_GNU_CPU)/DEBS/ ./" > /etc/apt/sources.list.d/ofed.list && \
-    apt update && KVERSION=$(ls /lib/modules) apt install -y mlnx-ofed-basic-user-only && \
-    apt-get download libxlio-dev && dpkg --force-all -i libxlio-dev*
+    apt update && KVERSION=$(ls /lib/modules) apt install -y mlnx-ofed-basic-user-only
+
+RUN set -eux; \
+    if [ $(dpkg-architecture -qDEB_HOST_GNU_CPU) = "aarch64" ]; then \
+        apt remove libxlio* -y; \
+        echo "Package: *\n\
+Pin: origin swx-repos.mtr.labs.mlnx\n\
+Pin-Priority: 750" > /etc/apt/preferences.d/swx-repos; \
+        echo "deb [trusted=yes] http://swx-repos.mtr.labs.mlnx/repository/libxlio-jammy-apt/ jammy main" > /etc/apt/sources.list.d/xlio.list && \
+        apt update && apt install libxlio=3.30.1-32 libxlio-dev=3.30.1-32 libxlio-utils=3.30.1-32 libxlio-dbg=3.30.1-32 -y; \
+    else \
+        apt-get download libxlio-dev && dpkg --force-all -i libxlio-dev*; \
+    fi
 
 RUN echo "${_LOGIN} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 RUN mkdir -p $_HOME
