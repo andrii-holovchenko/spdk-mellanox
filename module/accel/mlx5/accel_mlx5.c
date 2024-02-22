@@ -160,8 +160,6 @@ struct accel_mlx5_task {
 			uint16_t num_blocks;
 			uint16_t num_processed_blocks;
 		};
-		/* Number of bytes per signature operation. It is used for crc32c. */
-		uint32_t nbytes;
 		uint32_t last_umr_len;
 	};
 	/* for crypto op - number of allocated mkeys
@@ -1546,7 +1544,7 @@ accel_mlx5_crc_task_fill_sge(struct accel_mlx5_task *mlx5_task, struct accel_mlx
 	int rc;
 
 	rc = accel_mlx5_fill_block_sge(mlx5_task->qp, klm->src_klm, &mlx5_task->src, task->src_domain,
-				       task->src_domain_ctx, 0, mlx5_task->nbytes, &remaining);
+				       task->src_domain_ctx, 0, task->nbytes, &remaining);
 	if (spdk_unlikely(rc <= 0)) {
 		if (rc == 0) {
 			rc = -EINVAL;
@@ -1559,7 +1557,7 @@ accel_mlx5_crc_task_fill_sge(struct accel_mlx5_task *mlx5_task, struct accel_mlx
 
 	if (!mlx5_task->flags.bits.inplace) {
 		rc = accel_mlx5_fill_block_sge(qp, klm->dst_klm, &mlx5_task->dst, task->dst_domain,
-					       task->dst_domain_ctx, 0, mlx5_task->nbytes, &remaining);
+					       task->dst_domain_ctx, 0, task->nbytes, &remaining);
 		if (spdk_unlikely(rc <= 0)) {
 			if (rc == 0) {
 				rc = -EINVAL;
@@ -1599,7 +1597,7 @@ accel_mlx5_crc_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 	}
 	rc = accel_mlx5_crc_task_configure_umr(mlx5_task, klms.src_klm, klms.src_klm_count,
 					       mlx5_task->mkeys[0],
-					       SPDK_MLX5_UMR_SIG_DOMAIN_WIRE, mlx5_task->nbytes, true, true);
+					       SPDK_MLX5_UMR_SIG_DOMAIN_WIRE, mlx5_task->base.nbytes, true, true);
 	if (spdk_unlikely(rc)) {
 		SPDK_ERRLOG("UMR configure failed with %d\n", rc);
 		return rc;
@@ -2492,12 +2490,11 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
-	size_t src_nbytes = 0;
 #ifdef DEBUG
 	size_t dst_nbytes = 0;
+	uint32_t i;
 #endif
 	uint32_t num_blocks;
-	uint32_t i;
 	bool crypto_key_ok;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
@@ -2507,14 +2504,11 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 		return -ENOTSUP;
 	}
 
-	for (i = 0; i < task->s.iovcnt; i++) {
-		src_nbytes += task->s.iovs[i].iov_len;
-	}
 	crypto_key_ok = (task->crypto_key && task->crypto_key->module_if == &g_accel_mlx5.module &&
 			 task->crypto_key->priv);
-	if (spdk_unlikely((src_nbytes % mlx5_task->base.block_size != 0) || !crypto_key_ok)) {
+	if (spdk_unlikely((task->nbytes % mlx5_task->base.block_size != 0) || !crypto_key_ok)) {
 		if (crypto_key_ok) {
-			SPDK_ERRLOG("src length %zu is not a multiple of the block size %u\n", src_nbytes,
+			SPDK_ERRLOG("src length %"PRIu64" is not a multiple of the block size %u\n", task->nbytes,
 				    mlx5_task->base.block_size);
 		} else {
 			SPDK_ERRLOG("Wrong crypto key provided\n");
@@ -2523,7 +2517,7 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 	}
 
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, task->s.iovs, task->s.iovcnt);
-	num_blocks = src_nbytes / mlx5_task->base.block_size;
+	num_blocks = task->nbytes / mlx5_task->base.block_size;
 	mlx5_task->num_blocks = num_blocks;
 	mlx5_task->num_processed_blocks = 0;
 	if (task->d.iovcnt == 0 || (task->d.iovcnt == task->s.iovcnt &&
@@ -2536,8 +2530,8 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 		for (i = 0; i < task->d.iovcnt; i++) {
 			dst_nbytes += task->d.iovs[i].iov_len;
 		}
-		if (src_nbytes != dst_nbytes) {
-			SPDK_ERRLOG("src len %zu doesn't match dst len %zu\n", src_nbytes, dst_nbytes);
+		if (task->nbytes != dst_nbytes) {
+			SPDK_ERRLOG("src len %"PRIu64" doesn't match dst len %zu\n", task->nbytes, dst_nbytes);
 			return -EINVAL;
 		}
 #endif
@@ -2574,7 +2568,7 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 		return -ENOMEM;
 	}
 	SPDK_DEBUGLOG(accel_mlx5, "crypto task num_reqs %u, num_ops %u, num_blocks %u, src_len %zu\n",
-		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks, src_nbytes);
+		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks, task->nbytes);
 
 	return 0;
 }
@@ -2585,9 +2579,7 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
-	size_t src_nbytes = 0;
 	uint32_t num_blocks;
-	uint32_t i;
 	int rc;
 	bool crypto_key_ok;
 
@@ -2605,14 +2597,11 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 		return -ENOTSUP;
 	}
 
-	for (i = 0; i < task->s.iovcnt; i++) {
-		src_nbytes += task->s.iovs[i].iov_len;
-	}
 	crypto_key_ok = (task->crypto_key && task->crypto_key->module_if == &g_accel_mlx5.module &&
 			 task->crypto_key->priv);
-	if (spdk_unlikely((src_nbytes % mlx5_task->base.block_size != 0) || !crypto_key_ok)) {
+	if (spdk_unlikely((task->nbytes % mlx5_task->base.block_size != 0) || !crypto_key_ok)) {
 		if (crypto_key_ok) {
-			SPDK_ERRLOG("src length %zu is not a multiple of the block size %u\n", src_nbytes,
+			SPDK_ERRLOG("src length %"PRIu64" is not a multiple of the block size %u\n", task->nbytes,
 				    mlx5_task->base.block_size);
 		} else {
 			SPDK_ERRLOG("Wrong crypto key provided\n");
@@ -2620,7 +2609,7 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 		return -EINVAL;
 	}
 
-	num_blocks = src_nbytes / mlx5_task->base.block_size;
+	num_blocks = task->nbytes / mlx5_task->base.block_size;
 	if (dev->crypto_multi_block) {
 		if (spdk_unlikely(g_accel_mlx5.split_mb_blocks && num_blocks > g_accel_mlx5.split_mb_blocks)) {
 			SPDK_ERRLOG("Number of blocks in task %u exceeds split threshold %u, can't handle\n",
@@ -2652,7 +2641,7 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	mlx5_task->num_ops = 1;
 
 	SPDK_DEBUGLOG(accel_mlx5, "crypto task num_reqs %u, num_ops %u, num_blocks %u, src_len %zu\n",
-		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks, src_nbytes);
+		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks, task->nbytes);
 
 	return 0;
 }
@@ -2663,9 +2652,7 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
-	size_t dst_nbytes = 0;
 	uint32_t num_blocks;
-	uint32_t i;
 	int rc;
 	bool crypto_key_ok;
 
@@ -2683,14 +2670,11 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 		return -ENOTSUP;
 	}
 
-	for (i = 0; i < task->d.iovcnt; i++) {
-		dst_nbytes += task->d.iovs[i].iov_len;
-	}
 	crypto_key_ok = (task->crypto_key && task->crypto_key->module_if == &g_accel_mlx5.module &&
 			 task->crypto_key->priv);
-	if (spdk_unlikely((dst_nbytes % mlx5_task->base.block_size != 0) || !crypto_key_ok)) {
+	if (spdk_unlikely((task->nbytes % mlx5_task->base.block_size != 0) || !crypto_key_ok)) {
 		if (crypto_key_ok) {
-			SPDK_ERRLOG("dst length %zu is not a multiple of the block size %u\n", dst_nbytes,
+			SPDK_ERRLOG("dst length %"PRIu64" is not a multiple of the block size %u\n", task->nbytes,
 				    mlx5_task->base.block_size);
 		} else {
 			SPDK_ERRLOG("Wrong crypto key provided\n");
@@ -2698,7 +2682,7 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 		return -EINVAL;
 	}
 
-	num_blocks = dst_nbytes / mlx5_task->base.block_size;
+	num_blocks = task->nbytes / mlx5_task->base.block_size;
 	if (dev->crypto_multi_block) {
 		if (spdk_unlikely(g_accel_mlx5.split_mb_blocks && num_blocks > g_accel_mlx5.split_mb_blocks)) {
 			SPDK_ERRLOG("Number of blocks in task %u exceeds split threshold %u, can't handle\n",
@@ -2731,7 +2715,7 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	mlx5_task->num_ops = 1;
 
 	SPDK_DEBUGLOG(accel_mlx5, "crypto task num_reqs %u, num_ops %u, num_blocks %u, dst_len %zu\n",
-		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks, dst_nbytes);
+		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks, task->nbytes);
 
 	return 0;
 }
@@ -2740,8 +2724,6 @@ static inline int
 accel_mlx5_crc_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
-	size_t src_nbytes = 0;
-	uint32_t i;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
@@ -2749,11 +2731,6 @@ accel_mlx5_crc_task_init(struct accel_mlx5_task *mlx5_task)
 		SPDK_ERRLOG("Can't handle driver seq with accel memory domain\n");
 		return -ENOTSUP;
 	}
-
-	for (i = 0; i < task->s.iovcnt; i++) {
-		src_nbytes += task->s.iovs[i].iov_len;
-	}
-	mlx5_task->nbytes = src_nbytes;
 
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, task->s.iovs, task->s.iovcnt);
 	if (mlx5_task->flags.bits.inplace) {
@@ -2777,9 +2754,7 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
-	size_t src_nbytes = 0;
 	uint32_t num_blocks;
-	uint32_t i;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
@@ -2788,15 +2763,11 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 		return -ENOTSUP;
 	}
 
-	for (i = 0; i < task->s.iovcnt; i++) {
-		src_nbytes += task->s.iovs[i].iov_len;
-	}
-
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, mlx5_task->base.s.iovs, mlx5_task->base.s.iovcnt);
 	if (!mlx5_task->flags.bits.inplace) {
 		accel_mlx5_iov_sgl_init(&mlx5_task->dst, mlx5_task->base.d.iovs, mlx5_task->base.d.iovcnt);
 	}
-	num_blocks = src_nbytes / mlx5_task->base.block_size;
+	num_blocks = task->nbytes / mlx5_task->base.block_size;
 	mlx5_task->num_blocks = num_blocks;
 	if (dev->crypto_multi_block) {
 		if (g_accel_mlx5.split_mb_blocks) {
@@ -2827,19 +2798,13 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_accel_task *task_crypto;
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
-	size_t src_nbytes = 0;
 	uint32_t num_blocks;
-	uint32_t i;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
 			   mlx5_task->base.dst_domain == spdk_accel_get_memory_domain()))) {
 		SPDK_ERRLOG("Can't handle driver seq with accel memory domain\n");
 		return -ENOTSUP;
-	}
-
-	for (i = 0; i < task->s.iovcnt; i++) {
-		src_nbytes += task->s.iovs[i].iov_len;
 	}
 
 	task_crypto = TAILQ_NEXT(task, seq_link);
@@ -2849,7 +2814,7 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 	if (!mlx5_task->flags.bits.inplace) {
 		accel_mlx5_iov_sgl_init(&mlx5_task->dst, task_crypto->d.iovs, task_crypto->d.iovcnt);
 	}
-	num_blocks = src_nbytes / task_crypto->block_size;
+	num_blocks = task->nbytes / task_crypto->block_size;
 	mlx5_task->num_blocks = num_blocks;
 	if (dev->crypto_multi_block) {
 		if (g_accel_mlx5.split_mb_blocks) {

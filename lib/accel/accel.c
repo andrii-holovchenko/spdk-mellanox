@@ -1517,6 +1517,7 @@ spdk_accel_append_check_crc32c(struct spdk_accel_sequence **pseq,
 	task->dst_domain = NULL;
 	task->s.iovs = src_iovs;
 	task->s.iovcnt = src_iovcnt;
+	task->nbytes = accel_get_iovlen(src_iovs, src_iovcnt);
 	task->crc = crc;
 	task->seed = seed;
 	task->op_code = SPDK_ACCEL_OPC_CHECK_CRC32C;
