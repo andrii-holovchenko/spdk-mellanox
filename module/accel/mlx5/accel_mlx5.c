@@ -79,8 +79,9 @@ struct accel_mlx5_dev_ctx {
 	struct spdk_rdma_utils_memory_domain *domain;
 	struct spdk_rdma_utils_mem_map *map;
 	uint32_t num_mkeys;
-	uint32_t crypto_mkey_flags;
-	uint32_t sig_mkey_flags;
+	bool crypto_mkeys;
+	bool sig_mkeys;
+	bool crypto_sig_mkeys;
 	bool crypto_multi_block;
 };
 
@@ -201,6 +202,7 @@ struct accel_mlx5_dev {
 	struct accel_mlx5_qpairs_map qpairs_map;
 	void *crypto_mkeys;
 	void *sig_mkeys;
+	void *crypto_sig_mkeys;
 	/* Points to a pool owned by dev_ctx */
 	struct spdk_mempool *psv_pool_ref;
 	/* Points to a PD owned by dev_ctx */
@@ -420,7 +422,7 @@ accel_mlx5_encrypt_crc_task_complete(struct accel_mlx5_task *mlx5_task)
 	*task_crc->crc_dst = *mlx5_task->psv->crc ^ UINT32_MAX;
 	/* Normal task completion without allocated mkeys is not possible */
 	assert(mlx5_task->num_ops);
-	spdk_mlx5_mkey_pool_put_bulk(dev->sig_mkeys, mlx5_task->mkeys, mlx5_task->num_ops);
+	spdk_mlx5_mkey_pool_put_bulk(dev->crypto_sig_mkeys, mlx5_task->mkeys, mlx5_task->num_ops);
 	spdk_mempool_put(dev->psv_pool_ref, mlx5_task->psv);
 	spdk_accel_task_complete(&mlx5_task->base, 0);
 }
@@ -445,7 +447,7 @@ accel_mlx5_crc_decrypt_task_complete(struct accel_mlx5_task *mlx5_task)
 
 	/* Normal task completion without allocated mkeys is not possible */
 	assert(mlx5_task->num_ops);
-	spdk_mlx5_mkey_pool_put_bulk(dev->sig_mkeys, mlx5_task->mkeys, mlx5_task->num_ops);
+	spdk_mlx5_mkey_pool_put_bulk(dev->crypto_sig_mkeys, mlx5_task->mkeys, mlx5_task->num_ops);
 	spdk_mempool_put(dev->psv_pool_ref, mlx5_task->psv);
 	spdk_accel_task_complete(&mlx5_task->base, sigerr);
 }
@@ -514,7 +516,7 @@ accel_mlx5_task_fail(struct accel_mlx5_task *task, int rc)
 		if (task->mlx5_opcode == ACCEL_MLX5_OPC_CRC32C ||
 		    task->mlx5_opcode == ACCEL_MLX5_OPC_ENCRYPT_AND_CRC32C ||
 		    task->mlx5_opcode == ACCEL_MLX5_OPC_CRC32C_AND_DECRYPT) {
-			spdk_mlx5_mkey_pool_put_bulk(dev->sig_mkeys, task->mkeys, task->num_ops);
+			spdk_mlx5_mkey_pool_put_bulk(dev->crypto_sig_mkeys, task->mkeys, task->num_ops);
 			spdk_mempool_put(dev->psv_pool_ref, task->psv);
 		}
 	}
@@ -2107,12 +2109,12 @@ accel_mlx5_crc_task_process(struct accel_mlx5_task *mlx5_task)
 }
 
 static inline int
-accel_mlx5_task_alloc_crc_ctx(struct accel_mlx5_task *task)
+accel_mlx5_task_alloc_crc_ctx(struct accel_mlx5_task *task, void *mkey_pool)
 {
 	struct accel_mlx5_qp *qp = task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
 
-	if (spdk_unlikely(accel_mlx5_task_alloc_mkeys(task, dev->sig_mkeys))) {
+	if (spdk_unlikely(accel_mlx5_task_alloc_mkeys(task, mkey_pool))) {
 		SPDK_DEBUGLOG(accel_mlx5, "no reqs in signature mkey pool, dev %s\n",
 			      dev->pd_ref->context->device->name);
 		return -ENOMEM;
@@ -2120,7 +2122,7 @@ accel_mlx5_task_alloc_crc_ctx(struct accel_mlx5_task *task)
 	task->psv = spdk_mempool_get(dev->psv_pool_ref);
 	if (spdk_unlikely(!task->psv)) {
 		SPDK_DEBUGLOG(accel_mlx5, "no reqs in psv pool, dev %s\n", dev->pd_ref->context->device->name);
-		spdk_mlx5_mkey_pool_put_bulk(dev->sig_mkeys, task->mkeys, task->num_ops);
+		spdk_mlx5_mkey_pool_put_bulk(mkey_pool, task->mkeys, task->num_ops);
 		task->num_ops = 0;
 		return -ENOMEM;
 	}
@@ -2131,7 +2133,7 @@ accel_mlx5_task_alloc_crc_ctx(struct accel_mlx5_task *task)
 
 		if (qp_slot < n_slots) {
 			spdk_mempool_put(dev->psv_pool_ref, task->psv);
-			spdk_mlx5_mkey_pool_put_bulk(dev->sig_mkeys, task->mkeys, task->num_ops);
+			spdk_mlx5_mkey_pool_put_bulk(mkey_pool, task->mkeys, task->num_ops);
 			task->num_ops = 0;
 			return -ENOMEM;
 		}
@@ -2223,7 +2225,7 @@ accel_mlx5_crc_task_continue(struct accel_mlx5_task *task)
 	int rc;
 
 	if (task->num_ops == 0) {
-		rc = accel_mlx5_task_alloc_crc_ctx(task);
+		rc = accel_mlx5_task_alloc_crc_ctx(task, dev->sig_mkeys);
 		if (spdk_unlikely(rc != 0)) {
 			/* Pool is empty, queue this task */
 			STAILQ_INSERT_TAIL(&dev->nomem, task, link);
@@ -2251,7 +2253,7 @@ accel_mlx5_crypto_crc_task_continue_init(struct accel_mlx5_task *task)
 	int rc;
 
 	if (task->num_ops == 0) {
-		rc = accel_mlx5_task_alloc_crc_ctx(task);
+		rc = accel_mlx5_task_alloc_crc_ctx(task, dev->crypto_sig_mkeys);
 		if (spdk_unlikely(rc != 0)) {
 			/* Pool is empty, queue this task */
 			STAILQ_INSERT_TAIL(&dev->nomem, task, link);
@@ -2903,6 +2905,7 @@ static inline int
 accel_mlx5_crc_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
+	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
@@ -2921,7 +2924,7 @@ accel_mlx5_crc_task_init(struct accel_mlx5_task *mlx5_task)
 				      mlx5_task->dst.iov, mlx5_task->dst.iovcnt);
 	}
 
-	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task))) {
+	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->sig_mkeys))) {
 		return -ENOMEM;
 	}
 
@@ -2962,7 +2965,7 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 		mlx5_task->blocks_per_req = 1;
 	}
 
-	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task))) {
+	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys))) {
 		return -ENOMEM;
 	}
 	SPDK_DEBUGLOG(accel_mlx5, "crypto and crc task num_reqs %u, num_ops %u, num_blocks %u\n",
@@ -3009,7 +3012,7 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 		mlx5_task->blocks_per_req = 1;
 	}
 
-	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task))) {
+	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys))) {
 		return -ENOMEM;
 	}
 	SPDK_DEBUGLOG(accel_mlx5, "crypto and crc task num_reqs %u, num_ops %u, num_blocks %u\n",
@@ -3265,18 +3268,6 @@ accel_mlx5_submit_tasks(struct spdk_io_channel *_ch, struct spdk_accel_task *tas
 
 	accel_mlx5_task_init_opcode(mlx5_task);
 
-	/*
-	 * TODO: Fix crc_op when the merge crypto and CRC is enabled.
-	 *
-	 * Signature MKeys are created with crypto support when the merge is enabled
-	 * in the configuration. Since UMR cannot disable crypto for the MKey, we
-	 * cannot handle CRC tasks in this case if they are not merged with crypto
-	 * tasks. This limitation is not a problem for the NVMe TCP initiator use
-	 * cases and will be removed later.
-	 */
-	assert((g_accel_mlx5.merge && !(mlx5_task->mlx5_opcode == ACCEL_MLX5_OPC_CRC32C)) ||
-	       !g_accel_mlx5.merge);
-
 	mlx5_task->qp = accel_mlx5_task_assign_qp(mlx5_task, dev);
 	if (spdk_unlikely(!mlx5_task->qp)) {
 		return -EIO;
@@ -3289,7 +3280,7 @@ accel_mlx5_submit_tasks(struct spdk_io_channel *_ch, struct spdk_accel_task *tas
 	rc = g_accel_mlx5_tasks_ops[mlx5_task->mlx5_opcode].init(mlx5_task);
 	if (spdk_unlikely(rc)) {
 		if (rc == -ENOMEM) {
-			SPDK_DEBUGLOG(accel_mlx5, "no reqs to handle new task %p (requred %u), put to queue\n", mlx5_task,
+			SPDK_DEBUGLOG(accel_mlx5, "no reqs to handle new task %p (required %u), put to queue\n", mlx5_task,
 				      mlx5_task->num_reqs);
 			STAILQ_INSERT_TAIL(&dev->nomem, mlx5_task, link);
 			return 0;
@@ -3451,7 +3442,11 @@ accel_mlx5_process_cpls_siglast(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_
 		if (spdk_unlikely(wc[i].status == MLX5_CQE_SYNDROME_SIGERR)) {
 			struct spdk_mlx5_mkey_pool_obj *mkey;
 
-			mkey = spdk_mlx5_mkey_pool_find_mkey_by_id(dev->sig_mkeys, wc[i].mkey);
+			/* We don't know which pool (sig or crypto_sig) this mkey belongs to, so try both */
+			mkey = spdk_mlx5_mkey_pool_find_mkey_by_id(dev->crypto_sig_mkeys, wc[i].mkey);
+			if (!mkey) {
+				mkey = spdk_mlx5_mkey_pool_find_mkey_by_id(dev->sig_mkeys, wc[i].mkey);
+			}
 			assert(mkey);
 			mkey->sig.sigerr_count++;
 			mkey->sig.sigerr = true;
@@ -3516,7 +3511,11 @@ accel_mlx5_process_cpls(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_completi
 		if (spdk_unlikely(wc[i].status == MLX5_CQE_SYNDROME_SIGERR)) {
 			struct spdk_mlx5_mkey_pool_obj *mkey;
 
-			mkey = spdk_mlx5_mkey_pool_find_mkey_by_id(dev->sig_mkeys, wc[i].mkey);
+			/* We don't know which pool (sig or crypto_sig) this mkey belongs to, so try both */
+			mkey = spdk_mlx5_mkey_pool_find_mkey_by_id(dev->crypto_sig_mkeys, wc[i].mkey);
+			if (!mkey) {
+				mkey = spdk_mlx5_mkey_pool_find_mkey_by_id(dev->sig_mkeys, wc[i].mkey);
+			}
 			assert(mkey);
 			mkey->sig.sigerr_count++;
 			mkey->sig.sigerr = true;
@@ -3751,6 +3750,10 @@ accel_mlx5_destroy_cb(void *io_device, void *ctx_buf)
 		if (dev->sig_mkeys) {
 			spdk_mlx5_mkey_pool_put_channel(dev->sig_mkeys);
 		}
+		if (dev->crypto_sig_mkeys) {
+			spdk_mlx5_mkey_pool_put_channel(dev->crypto_sig_mkeys);
+		}
+
 		spdk_spin_lock(&g_accel_mlx5.lock);
 		accel_mlx5_add_stats(&g_accel_mlx5.stats, &dev->stats);
 		spdk_spin_unlock(&g_accel_mlx5.lock);
@@ -3809,8 +3812,9 @@ accel_mlx5_create_cb(void *io_device, void *ctx_buf)
 		dev->map_ref = dev_ctx->map;
 		dev->ch = spdk_io_channel_from_ctx(ctx_buf);
 		RB_INIT(&dev->qpairs_map);
-		if (dev_ctx->crypto_mkey_flags) {
-			dev->crypto_mkeys = spdk_mlx5_mkey_pool_get_channel(dev->pd_ref, dev_ctx->crypto_mkey_flags);
+
+		if (dev_ctx->crypto_mkeys) {
+			dev->crypto_mkeys = spdk_mlx5_mkey_pool_get_channel(dev->pd_ref, SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO);
 			if (!dev->crypto_mkeys) {
 				SPDK_ERRLOG("Failed to get crypto mkey pool channel, dev %s\n", dev_ctx->context->device->name);
 				/* Should not happen since mkey pool is created on accel_mlx5 initialization.
@@ -3819,10 +3823,21 @@ accel_mlx5_create_cb(void *io_device, void *ctx_buf)
 				goto err_out;
 			}
 		}
-		if (dev_ctx->sig_mkey_flags) {
-			dev->sig_mkeys = spdk_mlx5_mkey_pool_get_channel(dev->pd_ref, dev_ctx->sig_mkey_flags);
+		if (dev_ctx->sig_mkeys) {
+			dev->sig_mkeys = spdk_mlx5_mkey_pool_get_channel(dev->pd_ref, SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
 			if (!dev->sig_mkeys) {
 				SPDK_ERRLOG("Failed to get sig mkey pool channel, dev %s\n", dev_ctx->context->device->name);
+				/* Should not happen since mkey pool is created on accel_mlx5 initialization.
+				 * We should not be here if pool creation failed */
+				assert(0);
+				goto err_out;
+			}
+		}
+		if (dev_ctx->crypto_sig_mkeys) {
+			dev->crypto_sig_mkeys = spdk_mlx5_mkey_pool_get_channel(dev->pd_ref,
+						SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO | SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
+			if (!dev->crypto_sig_mkeys) {
+				SPDK_ERRLOG("Failed to get crypto_sig mkey pool channel, dev %s\n", dev_ctx->context->device->name);
 				/* Should not happen since mkey pool is created on accel_mlx5 initialization.
 				 * We should not be here if pool creation failed */
 				assert(0);
@@ -4022,11 +4037,15 @@ accel_mlx5_free_resources(void)
 		accel_mlx5_psvs_release(dev);
 		spdk_rdma_utils_put_memory_domain(dev->domain);
 		spdk_rdma_utils_free_mem_map(&dev->map);
-		if (dev->sig_mkey_flags) {
-			spdk_mlx5_mkey_pools_destroy(&dev->pd, 1, dev->sig_mkey_flags);
+		if (dev->sig_mkeys) {
+			spdk_mlx5_mkey_pools_destroy(&dev->pd, 1, SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
 		}
-		if (dev->crypto_mkey_flags) {
-			spdk_mlx5_mkey_pools_destroy(&dev->pd, 1, dev->crypto_mkey_flags);
+		if (dev->crypto_mkeys) {
+			spdk_mlx5_mkey_pools_destroy(&dev->pd, 1, SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO);
+		}
+		if (dev->crypto_sig_mkeys) {
+			spdk_mlx5_mkey_pools_destroy(&dev->pd, 1,
+						     SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO | SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
 		}
 		spdk_rdma_utils_put_pd(dev->pd);
 	}
@@ -4185,13 +4204,12 @@ accel_mlx5_dev_ctx_init(struct accel_mlx5_dev_ctx *dev_ctx, struct ibv_context *
 
 	if (g_accel_mlx5.crypto_supported) {
 		assert(crypto_caps);
-		dev_ctx->crypto_mkey_flags = SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO;
-		rc = accel_mlx5_mkeys_create(dev_ctx, dev_ctx->crypto_mkey_flags);
+		rc = accel_mlx5_mkeys_create(dev_ctx, SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO);
 		if (rc) {
 			SPDK_ERRLOG("Failed to create crypto mkeys pool, rc %d, dev %s\n", rc, dev->device->name);
-			dev_ctx->crypto_mkey_flags = 0;
 			return rc;
 		}
+		dev_ctx->crypto_mkeys = true;
 		/* Explicitly disabled by default */
 		dev_ctx->crypto_multi_block = false;
 		if (crypto_caps->multi_block_be_tweak) {
@@ -4210,22 +4228,28 @@ accel_mlx5_dev_ctx_init(struct accel_mlx5_dev_ctx *dev_ctx, struct ibv_context *
 	}
 
 	if (g_accel_mlx5.crc_supported) {
-		dev_ctx->sig_mkey_flags = SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE;
-		if (g_accel_mlx5.merge) {
-			dev_ctx->sig_mkey_flags |= SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO;
-		}
-		rc = accel_mlx5_mkeys_create(dev_ctx, dev_ctx->sig_mkey_flags);
+		rc = accel_mlx5_mkeys_create(dev_ctx, SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
 		if (rc) {
-			SPDK_ERRLOG("Failed to create sig mkeys pool, rc %d, flags %x, dev %s\n", rc,
-				    dev_ctx->sig_mkey_flags, dev->device->name);
-			dev_ctx->sig_mkey_flags = 0;
+			SPDK_ERRLOG("Failed to create sig mkeys pool, rc %d, dev %s\n", rc, dev->device->name);
 			return rc;
 		}
+		dev_ctx->sig_mkeys = true;
+
 		rc = accel_mlx5_psvs_create(dev_ctx);
 		if (rc) {
 			SPDK_ERRLOG("Failed to create PSVs pool, rc %d, dev %s\n", rc, dev->device->name);
 			return rc;
 		}
+	}
+
+	if (g_accel_mlx5.crypto_supported && g_accel_mlx5.crc_supported && g_accel_mlx5.merge) {
+		rc = accel_mlx5_mkeys_create(dev_ctx,
+					     SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO | SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
+		if (rc) {
+			SPDK_ERRLOG("Failed to create crypto_sig mkeys pool, rc %d, dev %s\n", rc, dev->device->name);
+			return rc;
+		}
+		dev_ctx->crypto_sig_mkeys = true;
 	}
 
 	return 0;
