@@ -178,7 +178,7 @@ SPDK_STATIC_ASSERT(sizeof(struct spdk_accel_sequence) == 72, "invalid size");
 #define accel_update_task_stats(ch, task, event, v) \
 	accel_update_stats(ch, operations[(task)->op_code].event, v)
 
-static inline void accel_sequence_task_cb(void *cb_arg, int status);
+static void accel_sequence_task_cb(void *cb_arg, struct spdk_accel_task *task, int status);
 
 static inline void
 accel_sequence_set_state(struct spdk_accel_sequence *seq, enum accel_sequence_state state)
@@ -299,7 +299,7 @@ spdk_accel_task_complete(struct spdk_accel_task *accel_task, int status)
 	}
 
 	if (accel_task->seq) {
-		accel_sequence_task_cb(accel_task->seq, status);
+		accel_sequence_task_cb(accel_task->seq, accel_task, status);
 		return;
 	}
 
@@ -1076,7 +1076,7 @@ accel_sequence_put(struct spdk_accel_sequence *seq)
 	SLIST_INSERT_HEAD(&ch->seq_pool, seq, link);
 }
 
-static void accel_sequence_task_cb(void *cb_arg, int status);
+static void accel_sequence_task_cb(void *cb_arg, struct spdk_accel_task *task, int status);
 
 static inline struct spdk_accel_task *
 accel_sequence_get_task(struct accel_io_channel *ch, struct spdk_accel_sequence *seq,
@@ -2128,10 +2128,9 @@ accel_process_sequence(struct spdk_accel_sequence *seq)
 }
 
 static void
-accel_sequence_task_cb(void *cb_arg, int status)
+accel_sequence_task_cb(void *cb_arg, struct spdk_accel_task *task, int status)
 {
 	struct spdk_accel_sequence *seq = cb_arg;
-	struct spdk_accel_task *task = TAILQ_FIRST(&seq->tasks);
 
 	switch (seq->state) {
 	case ACCEL_SEQUENCE_STATE_AWAIT_TASK:
