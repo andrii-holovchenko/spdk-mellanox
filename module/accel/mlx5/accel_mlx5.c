@@ -150,6 +150,10 @@ struct accel_mlx5_task {
 			uint16_t last_mkey_idx;
 		};
 	};
+	struct {
+		uint32_t *crc;
+		uint32_t seed;
+	} encrypt_crc;
 	union {
 		uint8_t raw;
 		struct {
@@ -419,10 +423,9 @@ accel_mlx5_crc_task_complete(struct accel_mlx5_task *mlx5_task)
 static inline void
 accel_mlx5_encrypt_crc_task_complete(struct accel_mlx5_task *mlx5_task)
 {
-	struct spdk_accel_task *task_crc = TAILQ_NEXT(&mlx5_task->base, seq_link);
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
 
-	*task_crc->crc_dst = *mlx5_task->psv->crc ^ UINT32_MAX;
+	*mlx5_task->encrypt_crc.crc = *mlx5_task->psv->crc ^ UINT32_MAX;
 	/* Normal task completion without allocated mkeys is not possible */
 	assert(mlx5_task->num_ops);
 	spdk_mlx5_mkey_pool_put_bulk(dev->crypto_sig_mkeys, mlx5_task->mkeys, mlx5_task->num_ops);
@@ -1289,7 +1292,6 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 {
 	struct accel_mlx5_klm klms[ACCEL_MLX5_MAX_MKEYS_IN_TASK];
 	struct spdk_accel_task *task;
-	struct spdk_accel_task *task_crc;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
 	uint64_t iv;
@@ -1308,10 +1310,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 	int rc = 0;
 
 	task = &mlx5_task->base;
-	task_crc = TAILQ_NEXT(task, seq_link);
-
 	assert(task);
-	assert(task_crc);
 
 	if (spdk_unlikely(!num_ops)) {
 		return -EINVAL;
@@ -1369,8 +1368,8 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 				src_lkey, dst_lkey,
 				SPDK_MLX5_UMR_SIG_DOMAIN_WIRE,
 				mlx5_task->psv->psv_index,
-				task_crc->crc_dst,
-				task_crc->seed, iv, req_len,
+				mlx5_task->encrypt_crc.crc,
+				mlx5_task->encrypt_crc.seed, iv, req_len,
 				init_signature, gen_signature,
 				true);
 		if (spdk_unlikely(rc)) {
@@ -1387,7 +1386,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 
 	if (spdk_unlikely(mlx5_task->psv->bits.error)) {
-		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, task_crc->seed, 0, 0);
+		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, mlx5_task->encrypt_crc.seed, 0, 0);
 		if (spdk_unlikely(rc)) {
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
@@ -2932,6 +2931,7 @@ static inline int
 accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
+	struct spdk_accel_task *task_crc;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
 	struct spdk_mlx5_crypto_dek_data dek_data;
 	uint32_t num_blocks;
@@ -2964,6 +2964,11 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 	}
 	mlx5_task->dek_obj_id = dek_data.dek_obj_id;
 	mlx5_task->tweak_mode = dek_data.tweak_mode;
+
+	task_crc = TAILQ_NEXT(task, seq_link);
+	assert(task_crc);
+	mlx5_task->encrypt_crc.crc = task_crc->crc_dst;
+	mlx5_task->encrypt_crc.seed = task_crc->seed;
 
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, mlx5_task->base.s.iovs, mlx5_task->base.s.iovcnt);
 	if (!mlx5_task->flags.bits.inplace) {
