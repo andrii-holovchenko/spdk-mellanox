@@ -274,6 +274,7 @@ static int xlio_sock_close(struct spdk_xlio_sock *sock);
 static void _pdu_write_done(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_pdu *pdu, int err);
 static inline int nvme_tcp_fill_data_mkeys(struct nvme_tcp_qpair *tqpair,
 		struct nvme_tcp_req *tcp_req, struct nvme_tcp_pdu *pdu);
+static void nvme_tcp_qpair_sock_cb(struct nvme_tcp_qpair *tqpair);
 
 static void
 xlio_sock_free_pools(void)
@@ -1805,10 +1806,9 @@ xlio_sock_poll_fd(int fd, uint32_t max_events_per_poll)
 }
 
 static int
-xlio_sock_group_impl_poll(struct spdk_xlio_sock_group_impl *group, int max_events,
-			  struct spdk_xlio_sock **socks)
+xlio_sock_group_impl_poll(struct spdk_xlio_sock_group_impl *group, int max_events)
 {
-	int num_events, i, rc;
+	int num_events, rc;
 	struct spdk_xlio_sock *vsock, *ptmp;
 	uint32_t max_events_per_poll;
 	struct spdk_xlio_ring_fd *ring_fd;
@@ -1873,13 +1873,8 @@ xlio_sock_group_impl_poll(struct spdk_xlio_sock_group_impl *group, int max_event
 			continue;
 		}
 
-		socks[num_events++] = vsock;
-	}
-
-	/* Cycle the pending_recv list so that each time we poll things aren't
-	 * in the same order. */
-	for (i = 0; i < num_events; i++) {
-		vsock = socks[i];
+		nvme_tcp_qpair_sock_cb(SPDK_CONTAINEROF(vsock, struct nvme_tcp_qpair, sock));
+		num_events++;
 
 		TAILQ_REMOVE(&group->pending_recv, vsock, link);
 		vsock->flags.pending_recv = false;
@@ -5973,21 +5968,13 @@ nvme_tcp_poll_group_process_completions(struct spdk_nvme_transport_poll_group *t
 	struct nvme_tcp_poll_group *group = nvme_tcp_poll_group(tgroup);
 	struct spdk_nvme_qpair *qpair, *tmp_qpair;
 	struct nvme_tcp_qpair *tqpair, *tmp_tqpair;
-	struct spdk_xlio_sock *vsocks[MAX_EVENTS_PER_POLL];
-	int num_events, i;
+	int num_events;
 
 	group->completions_per_qpair = completions_per_qpair;
 	group->num_completions = 0;
 	group->stats.polls++;
 
-	num_events = xlio_sock_group_impl_poll(&group->xlio_group, MAX_EVENTS_PER_POLL, vsocks);
-
-	if (spdk_likely(num_events > 0)) {
-		for (i = 0; i < num_events; i++) {
-			struct spdk_xlio_sock *vsock = vsocks[i];
-			nvme_tcp_qpair_sock_cb(SPDK_CONTAINEROF(vsock, struct nvme_tcp_qpair, sock));
-		}
-	}
+	num_events = xlio_sock_group_impl_poll(&group->xlio_group, MAX_EVENTS_PER_POLL);
 
 	STAILQ_FOREACH_SAFE(qpair, &tgroup->disconnected_qpairs, poll_group_stailq, tmp_qpair) {
 		tqpair = nvme_tcp_qpair(qpair);
