@@ -2882,6 +2882,8 @@ nvme_tcp_req_complete_safe(struct nvme_tcp_req *tcp_req)
 static void
 nvme_tcp_qpair_cmd_send_complete(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_req *tcp_req)
 {
+	struct spdk_nvme_transport_poll_group *group = tqpair->qpair.poll_group;
+
 	tcp_req->ordering.bits.send_ack = 1;
 	SPDK_DEBUGLOG(nvme, "tqpair %p %u, sock %p, tcp_req %p pdu %p, ordering %x cid %u\n", tqpair,
 		      tqpair->qpair.id, &tqpair->sock, tcp_req, &tcp_req->pdu, tcp_req->ordering.raw, tcp_req->cid);
@@ -2890,6 +2892,13 @@ nvme_tcp_qpair_cmd_send_complete(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_
 		SPDK_DEBUGLOG(nvme, "tcp req %p, send H2C data\n", tcp_req);
 		nvme_tcp_send_h2c_data(tcp_req);
 	} else {
+		if (group && tcp_req->iobuf_iov.iov_base) {
+			spdk_iobuf_put(group->group->accel_fn_table.get_iobuf_channel(group->group->ctx),
+				       tcp_req->iobuf_iov.iov_base,
+				       tcp_req->iobuf_iov.iov_len);
+			tcp_req->iobuf_iov.iov_base = NULL;
+		}
+
 		nvme_tcp_req_complete_safe(tcp_req);
 	}
 }
@@ -4235,6 +4244,7 @@ end:
 static void
 nvme_tcp_qpair_h2c_data_send_complete(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_req *tcp_req)
 {
+	struct spdk_nvme_transport_poll_group *group = tqpair->qpair.poll_group;
 	assert(tcp_req != NULL);
 
 	tcp_req->ordering.bits.send_ack = 1;
@@ -4254,6 +4264,13 @@ nvme_tcp_qpair_h2c_data_send_complete(struct nvme_tcp_qpair *tqpair, struct nvme
 			tcp_req->ordering.bits.state = NVME_TCP_REQ_ACTIVE_R2T;
 			nvme_tcp_send_h2c_data(tcp_req);
 			return;
+		}
+
+		if (group && tcp_req->iobuf_iov.iov_base) {
+			spdk_iobuf_put(group->group->accel_fn_table.get_iobuf_channel(group->group->ctx),
+				       tcp_req->iobuf_iov.iov_base,
+				       tcp_req->iobuf_iov.iov_len);
+			tcp_req->iobuf_iov.iov_base = NULL;
 		}
 
 		/* Need also call this function to free the resource */
