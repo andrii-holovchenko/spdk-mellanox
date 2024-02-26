@@ -226,7 +226,6 @@ struct accel_mlx5_dev {
 	struct spdk_io_channel *ch;
 	/* Pending tasks waiting for requests resources */
 	STAILQ_HEAD(, accel_mlx5_task) nomem;
-	STAILQ_HEAD(, accel_mlx5_task) merged;
 	uint32_t wrs_in_cq;
 	bool crypto_multi_block;
 	struct accel_mlx5_stats stats;
@@ -447,15 +446,6 @@ accel_mlx5_crc_decrypt_task_complete(struct accel_mlx5_task *mlx5_task)
 
 	assert(mlx5_task->base.op_code == SPDK_ACCEL_OPC_CHECK_CRC32C);
 	sigerr = accel_mlx5_task_check_sigerr(mlx5_task);
-	if (spdk_unlikely(sigerr)) {
-		struct spdk_accel_task *task_next = TAILQ_NEXT(&mlx5_task->base, seq_link);
-		struct accel_mlx5_task *mlx5_task_next = SPDK_CONTAINEROF(task_next, struct accel_mlx5_task, base);
-
-		/* The accel will not submit the next task because the current one is failed.
-		 * That's why the merged flag is reset here.
-		 */
-		mlx5_task_next->flags.bits.merged = 0;
-	}
 
 	/* Normal task completion without allocated mkeys is not possible */
 	assert(mlx5_task->num_ops);
@@ -478,12 +468,7 @@ accel_mlx5_task_complete(struct accel_mlx5_task *task)
 	driver_seq = task->flags.bits.driver_seq;
 	task->flags.bits.driver_seq = 0;
 
-	if (task->flags.bits.merged) {
-		task->flags.bits.merged = 0;
-		spdk_accel_task_complete(&task->base, 0);
-	} else {
-		g_accel_mlx5_tasks_ops[task->mlx5_opcode].complete(task);
-	}
+	g_accel_mlx5_tasks_ops[task->mlx5_opcode].complete(task);
 
 	if (driver_seq) {
 		assert(seq);
@@ -503,23 +488,6 @@ accel_mlx5_task_fail(struct accel_mlx5_task *task, int rc)
 
 	assert(rc);
 	SPDK_DEBUGLOG(accel_mlx5, "Fail task %p, opc %d, rc %d\n", task, task->base.op_code, rc);
-
-	if (task->flags.bits.merged) {
-		task->flags.bits.merged = 0;
-		spdk_accel_task_complete(&task->base, rc);
-		return;
-	}
-
-	if (task->mlx5_opcode == ACCEL_MLX5_OPC_ENCRYPT_AND_CRC32C ||
-	    task->mlx5_opcode == ACCEL_MLX5_OPC_CRC32C_AND_DECRYPT) {
-		struct spdk_accel_task *task_next = TAILQ_NEXT(&task->base, seq_link);
-		struct accel_mlx5_task *mlx5_task_next = SPDK_CONTAINEROF(task_next, struct accel_mlx5_task, base);
-
-		/* The accel will not submit the next task because the current one is failed.
-		 * That's why the merged flag is reset here.
-		 */
-		mlx5_task_next->flags.bits.merged = 0;
-	}
 
 	if (task->num_ops) {
 		if (task->mlx5_opcode == ACCEL_MLX5_OPC_CRYPTO) {
@@ -2987,6 +2955,9 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 		mlx5_task->blocks_per_req = 1;
 	}
 
+	/* We stored all necessary info about next task, now we can complete it to re-use as fast as possible */
+	spdk_accel_task_complete(task_crc, 0);
+
 	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys))) {
 		return -ENOMEM;
 	}
@@ -3075,6 +3046,10 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 		mlx5_task->blocks_per_req = 1;
 	}
 
+	/* We stored all necessary info about next task, now we can complete it to re-use as fast as possible */
+	spdk_accel_task_complete(task_crypto, 0);
+
+
 	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys))) {
 		return -ENOMEM;
 	}
@@ -3091,7 +3066,6 @@ accel_mlx5_task_merge_encrypt_and_crc(struct accel_mlx5_task *mlx5_task)
 	struct spdk_accel_task *task_next = TAILQ_NEXT(task, seq_link);
 	struct iovec *crypto_dst_iovs;
 	uint32_t crypto_dst_iovcnt;
-	struct accel_mlx5_task *mlx5_task_next;
 
 	assert(task->op_code == SPDK_ACCEL_OPC_ENCRYPT);
 
@@ -3118,8 +3092,6 @@ accel_mlx5_task_merge_encrypt_and_crc(struct accel_mlx5_task *mlx5_task)
 
 	assert(!mlx5_task->flags.bits.driver_mkey);
 	mlx5_task->mlx5_opcode = ACCEL_MLX5_OPC_ENCRYPT_AND_CRC32C;
-	mlx5_task_next = SPDK_CONTAINEROF(task_next, struct accel_mlx5_task, base);
-	mlx5_task_next->flags.bits.merged = 1;
 }
 
 static inline void
@@ -3127,14 +3099,12 @@ accel_mlx5_task_merge_crc_and_decrypt(struct accel_mlx5_task *mlx5_task_crc)
 {
 	struct spdk_accel_task *task_crc = &mlx5_task_crc->base;
 	struct spdk_accel_task *task_crypto = TAILQ_NEXT(task_crc, seq_link);
-	struct accel_mlx5_task *mlx5_task_crypto;
 
 	assert(task_crc->op_code == SPDK_ACCEL_OPC_CHECK_CRC32C);
 
 	if (!task_crypto || task_crypto->op_code != SPDK_ACCEL_OPC_DECRYPT) {
 		return;
 	}
-	mlx5_task_crypto = SPDK_CONTAINEROF(task_crypto, struct accel_mlx5_task, base);
 
 	if (task_crypto->d.iovcnt == 0 ||
 	    (task_crypto->d.iovcnt == task_crypto->s.iovcnt &&
@@ -3150,7 +3120,6 @@ accel_mlx5_task_merge_crc_and_decrypt(struct accel_mlx5_task *mlx5_task_crc)
 		return;
 	}
 
-	mlx5_task_crypto->flags.bits.merged = true;
 	mlx5_task_crc->mlx5_opcode = ACCEL_MLX5_OPC_CRC32C_AND_DECRYPT;
 	mlx5_task_crc->flags.bits.enc_order = MLX5_ENCRYPTION_ORDER_ENCRYPTED_RAW_MEMORY;
 }
@@ -3284,18 +3253,6 @@ accel_mlx5_submit_tasks(struct spdk_io_channel *_ch, struct spdk_accel_task *tas
 	int rc;
 
 	assert(g_accel_mlx5.enabled);
-
-	if (mlx5_task->flags.bits.merged) {
-		dev = &ch->devs[ch->dev_idx];
-		ch->dev_idx++;
-		if (ch->dev_idx == ch->num_devs) {
-			ch->dev_idx = 0;
-		}
-		mlx5_task->qp = &dev->mlx5_qp;
-		STAILQ_INSERT_TAIL(&dev->merged, mlx5_task, link);
-
-		return 0;
-	}
 
 	if (task->seq && (driver_ctx = spdk_accel_sequence_get_driver_ctx(task->seq)) != NULL) {
 		if (spdk_unlikely(task->op_code != SPDK_ACCEL_OPC_ENCRYPT &&
@@ -3650,17 +3607,6 @@ accel_mlx5_poll_cq(struct accel_mlx5_dev *dev)
 }
 
 static inline void
-accel_mlx5_complete_merged_tasks(struct accel_mlx5_dev *dev)
-{
-	struct accel_mlx5_task *task, *tmp;
-
-	STAILQ_FOREACH_SAFE(task, &dev->merged, link, tmp) {
-		STAILQ_REMOVE_HEAD(&dev->merged, link);
-		accel_mlx5_task_complete(task);
-	}
-}
-
-static inline void
 accel_mlx5_resubmit_nomem_tasks(struct accel_mlx5_dev *dev)
 {
 	struct accel_mlx5_task *task, *tmp, *last;
@@ -3701,10 +3647,6 @@ accel_mlx5_poller(void *ctx)
 
 		if (dev->wrs_in_cq) {
 			rc = accel_mlx5_poll_cq(dev);
-		}
-
-		if (!STAILQ_EMPTY(&dev->merged)) {
-			accel_mlx5_complete_merged_tasks(dev);
 		}
 
 		if (spdk_unlikely(rc < 0)) {
@@ -3927,7 +3869,6 @@ accel_mlx5_create_cb(void *io_device, void *ctx_buf)
 		}
 
 		STAILQ_INIT(&dev->nomem);
-		STAILQ_INIT(&dev->merged);
 	}
 
 	ch->poller = SPDK_POLLER_REGISTER(accel_mlx5_poller, ch, 0);
