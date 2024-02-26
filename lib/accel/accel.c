@@ -715,7 +715,7 @@ spdk_accel_submit_check_crc32c(struct spdk_io_channel *ch, uint32_t *crc,
 	accel_task->s.iovs[0].iov_base = src;
 	accel_task->s.iovs[0].iov_len = nbytes;
 	accel_task->s.iovcnt = 1;
-	accel_task->crc = crc;
+	accel_task->crc_dst = crc;
 	accel_task->seed = seed;
 	accel_task->op_code = SPDK_ACCEL_OPC_CHECK_CRC32C;
 	accel_task->src_domain = NULL;
@@ -755,7 +755,7 @@ spdk_accel_submit_check_crc32cv(struct spdk_io_channel *ch, uint32_t *crc,
 
 	accel_task->s.iovs = iov;
 	accel_task->s.iovcnt = iov_cnt;
-	accel_task->crc = crc;
+	accel_task->crc_dst = crc;
 	accel_task->seed = seed;
 	accel_task->op_code = SPDK_ACCEL_OPC_CHECK_CRC32C;
 	accel_task->src_domain = NULL;
@@ -1518,7 +1518,7 @@ spdk_accel_append_check_crc32c(struct spdk_accel_sequence **pseq,
 	task->s.iovs = src_iovs;
 	task->s.iovcnt = src_iovcnt;
 	task->nbytes = accel_get_iovlen(src_iovs, src_iovcnt);
-	task->crc = crc;
+	task->crc_dst = crc;
 	task->seed = seed;
 	task->op_code = SPDK_ACCEL_OPC_CHECK_CRC32C;
 

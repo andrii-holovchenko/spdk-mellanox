@@ -544,7 +544,7 @@ sw_accel_submit_tasks(struct spdk_io_channel *ch, struct spdk_accel_task *accel_
 			rc = _sw_accel_dif_generate_copy(sw_ch, accel_task);
 			break;
 		case SPDK_ACCEL_OPC_CHECK_CRC32C:
-			rc = _sw_accel_check_crc32cv(accel_task->crc, accel_task->s.iovs, accel_task->s.iovcnt,
+			rc = _sw_accel_check_crc32cv(accel_task->crc_dst, accel_task->s.iovs, accel_task->s.iovcnt,
 						     accel_task->seed);
 			break;
 		default:

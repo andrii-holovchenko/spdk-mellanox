@@ -1369,7 +1369,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 				src_lkey, dst_lkey,
 				SPDK_MLX5_UMR_SIG_DOMAIN_WIRE,
 				mlx5_task->psv->psv_index,
-				task_crc->crc,
+				task_crc->crc_dst,
 				task_crc->seed, iv, req_len,
 				init_signature, gen_signature,
 				true);
@@ -1556,7 +1556,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 				src_lkey, dst_lkey,
 				SPDK_MLX5_UMR_SIG_DOMAIN_MEMORY,
 				mlx5_task->psv->psv_index,
-				task_crc->crc,
+				task_crc->crc_dst,
 				task_crc->seed, iv, req_len,
 				init_signature, gen_signature,
 				false);
@@ -1745,14 +1745,14 @@ accel_mlx5_crc_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 	 */
 	assert(klm_count < ACCEL_MLX5_MAX_SGE);
 	if (check_op) {
-		*mlx5_task->psv->crc = *mlx5_task->base.crc ^ UINT32_MAX;
+		*mlx5_task->psv->crc = *mlx5_task->base.crc_dst ^ UINT32_MAX;
 	}
 	klm[klm_count].lkey = mlx5_task->psv->crc_lkey;
 	klm[klm_count].addr = (uintptr_t)mlx5_task->psv->crc;
 	klm[klm_count++].byte_count = sizeof(uint32_t);
 
 	if (spdk_unlikely(mlx5_task->psv->bits.error)) {
-		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, *mlx5_task->base.crc, 0, 0);
+		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, *mlx5_task->base.crc_dst, 0, 0);
 		if (spdk_unlikely(rc)) {
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
@@ -1947,7 +1947,7 @@ accel_mlx5_crc_task_process_multi_req(struct accel_mlx5_task *mlx5_task)
 	}
 
 	if (spdk_unlikely(mlx5_task->psv->bits.error)) {
-		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, *mlx5_task->base.crc, 0, 0);
+		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, *mlx5_task->base.crc_dst, 0, 0);
 		if (spdk_unlikely(rc)) {
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
@@ -2020,7 +2020,7 @@ accel_mlx5_crc_task_process_multi_req(struct accel_mlx5_task *mlx5_task)
 		assert(klm_count < (int)ACCEL_MLX5_MAX_SGE);
 		/* Add the crc destination to the end of KLMs. */
 		if (check_op) {
-			*mlx5_task->psv->crc = *mlx5_task->base.crc ^ UINT32_MAX;
+			*mlx5_task->psv->crc = *mlx5_task->base.crc_dst ^ UINT32_MAX;
 		}
 		klms[klm_count].lkey = mlx5_task->psv->crc_lkey;
 		klms[klm_count].addr = (uintptr_t)mlx5_task->psv->crc;
