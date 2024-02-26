@@ -3951,7 +3951,7 @@ accel_mlx5_get_default_attr(struct accel_mlx5_attr *attr)
 	attr->num_requests = ACCEL_MLX5_NUM_MKEYS;
 	attr->split_mb_blocks = 0;
 	attr->siglast = false;
-	attr->merge = false;
+	attr->enable_driver = false;
 	attr->qp_per_domain = false;
 }
 
@@ -4028,7 +4028,6 @@ accel_mlx5_enable(struct accel_mlx5_attr *attr)
 		g_accel_mlx5.num_requests = attr->num_requests;
 		g_accel_mlx5.split_mb_blocks = attr->split_mb_blocks;
 		g_accel_mlx5.siglast = attr->siglast;
-		g_accel_mlx5.merge = attr->merge;
 		g_accel_mlx5.qp_per_domain = attr->qp_per_domain;
 		g_accel_mlx5.enable_driver = attr->enable_driver;
 
@@ -4304,15 +4303,21 @@ accel_mlx5_dev_ctx_init(struct accel_mlx5_dev_ctx *dev_ctx, struct ibv_context *
 			return rc;
 		}
 	}
-
-	if (g_accel_mlx5.crypto_supported && g_accel_mlx5.crc_supported && g_accel_mlx5.merge) {
-		rc = accel_mlx5_mkeys_create(dev_ctx,
-					     SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO | SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
-		if (rc) {
-			SPDK_ERRLOG("Failed to create crypto_sig mkeys pool, rc %d, dev %s\n", rc, dev->device->name);
-			return rc;
+	if (g_accel_mlx5.enable_driver) {
+		if (g_accel_mlx5.crypto_supported && g_accel_mlx5.crc_supported) {
+			rc = accel_mlx5_mkeys_create(dev_ctx,
+						     SPDK_MLX5_MKEY_POOL_FLAG_CRYPTO | SPDK_MLX5_MKEY_POOL_FLAG_SIGNATURE);
+			if (rc) {
+				SPDK_ERRLOG("Failed to create crypto_sig mkeys pool, rc %d, dev %s\n", rc, dev->device->name);
+				return rc;
+			}
+			dev_ctx->crypto_sig_mkeys = true;
+			g_accel_mlx5.merge = true;
+			SPDK_NOTICELOG("driver enabled, crypto and crc merge supported\n");
+		} else {
+			g_accel_mlx5.merge = false;
+			SPDK_NOTICELOG("driver enabled, but crypto and crc merge is not supported\n");
 		}
-		dev_ctx->crypto_sig_mkeys = true;
 	}
 
 	return 0;
@@ -4475,11 +4480,6 @@ accel_mlx5_init(void)
 			       g_accel_mlx5.crc_supported);
 	}
 
-	if (g_accel_mlx5.merge && !g_accel_mlx5.crypto_supported) {
-		SPDK_WARNLOG("Crypto is not supported, merge functionality is disabled\n");
-		g_accel_mlx5.merge = false;
-	}
-
 	g_accel_mlx5.devices = calloc(num_devs, sizeof(*g_accel_mlx5.devices));
 	if (!g_accel_mlx5.devices) {
 		SPDK_ERRLOG("Memory allocation failed\n");
@@ -4539,7 +4539,7 @@ accel_mlx5_write_config_json(struct spdk_json_write_ctx *w)
 		spdk_json_write_named_uint16(w, "qp_size", g_accel_mlx5.qp_size);
 		spdk_json_write_named_uint16(w, "cq_size", g_accel_mlx5.cq_size);
 		spdk_json_write_named_uint32(w, "num_requests", g_accel_mlx5.num_requests);
-		spdk_json_write_named_bool(w, "merge", g_accel_mlx5.merge);
+		spdk_json_write_named_bool(w, "enable_driver", g_accel_mlx5.enable_driver);
 		spdk_json_write_named_uint32(w, "split_mb_blocks", g_accel_mlx5.split_mb_blocks);
 		if (g_accel_mlx5.allowed_devs_str) {
 			spdk_json_write_named_string(w, "allowed_devs", g_accel_mlx5.allowed_devs_str);

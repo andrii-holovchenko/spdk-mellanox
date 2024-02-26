@@ -29,7 +29,8 @@ def mlx5_scan_accel_module(client, qp_size=None, cq_size=None, num_requests=None
     if siglast is not None:
         params['siglast'] = siglast
     if merge is not None:
-        params['merge'] = merge
+        print("WARNING: merge param is deprecated and will be removed soon, use --enable-driver instead.")
+        params['enable_driver'] = merge
     if qp_per_domain is not None:
         params['qp_per_domain'] = qp_per_domain
     if enable_driver is not None:

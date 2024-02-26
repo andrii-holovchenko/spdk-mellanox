@@ -19,8 +19,6 @@ struct accel_mlx5_attr {
 	uint32_t split_mb_blocks;
 	/* Ignore CQ_UPDATE flags, mark last WQE with CQ_UPDATE before updating the DB */
 	bool siglast;
-	/* Merge tasks in the sequence when possible. */
-	bool merge;
 	bool qp_per_domain;
 	bool enable_driver;
 };
