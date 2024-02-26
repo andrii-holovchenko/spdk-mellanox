@@ -136,11 +136,13 @@ struct accel_mlx5_task {
 	union {
 		/* The struct is used for crypto */
 		struct {
+			uint32_t dek_obj_id;
 			/* Number of data blocks per crypto operation */
 			uint16_t blocks_per_req;
 			/* total num_blocks in this task */
 			uint16_t num_blocks;
 			uint16_t num_processed_blocks;
+			uint8_t tweak_mode;
 		};
 		/* The struct is used for crc/check_crc */
 		struct {
@@ -792,7 +794,7 @@ accel_mlx5_copy_task_process(struct accel_mlx5_task *mlx5_task)
 
 static inline int
 accel_mlx5_configure_crypto_umr(struct accel_mlx5_task *mlx5_task, struct accel_mlx5_qp *qp,
-				struct spdk_mlx5_crypto_dek_data *dek_data, struct accel_mlx5_klm *klm,
+				struct accel_mlx5_klm *klm,
 				uint32_t dv_mkey, uint32_t src_lkey, uint32_t dst_lkey,
 				uint32_t num_blocks, uint64_t wrid, uint32_t flags)
 {
@@ -851,8 +853,8 @@ accel_mlx5_configure_crypto_umr(struct accel_mlx5_task *mlx5_task, struct accel_
 	}
 	cattr.xts_iv = task->iv + mlx5_task->num_processed_blocks;
 	cattr.keytag = 0;
-	cattr.dek_obj_id = dek_data->dek_obj_id;
-	cattr.tweak_mode = dek_data->tweak_mode;
+	cattr.dek_obj_id = mlx5_task->dek_obj_id;
+	cattr.tweak_mode = mlx5_task->tweak_mode;
 	cattr.enc_order = mlx5_task->flags.bits.enc_order;
 	cattr.bs_selector = bs_to_bs_selector(block_size);
 	if (spdk_unlikely(!cattr.bs_selector)) {
@@ -985,8 +987,6 @@ static inline int
 accel_mlx5_crypto_task_process(struct accel_mlx5_task *mlx5_task)
 {
 	struct accel_mlx5_klm klms[ACCEL_MLX5_MAX_MKEYS_IN_TASK];
-	struct spdk_mlx5_crypto_dek_data dek_data;
-	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
 	uint32_t src_lkey = 0, dst_lkey = 0;
@@ -1007,11 +1007,6 @@ accel_mlx5_crypto_task_process(struct accel_mlx5_task *mlx5_task)
 	if (spdk_unlikely(rc)) {
 		return rc;
 	}
-	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, dev->pd_ref, &dek_data);
-	if (spdk_unlikely(rc)) {
-		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
-		return rc;
-	}
 
 	SPDK_DEBUGLOG(accel_mlx5, "begin, task, %p, reqs: total %u, submitted %u, completed %u\n",
 		      mlx5_task, mlx5_task->num_reqs, mlx5_task->num_submitted_reqs, mlx5_task->num_completed_reqs);
@@ -1025,7 +1020,7 @@ accel_mlx5_crypto_task_process(struct accel_mlx5_task *mlx5_task)
 		} else {
 			num_blocks = mlx5_task->blocks_per_req;
 		}
-		rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &dek_data, &klms[i], mlx5_task->mkeys[i]->mkey,
+		rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &klms[i], mlx5_task->mkeys[i]->mkey,
 						     src_lkey, dst_lkey, num_blocks, 0, 0);
 		if (spdk_unlikely(rc)) {
 			SPDK_ERRLOG("UMR configure failed with %d\n", rc);
@@ -1108,7 +1103,6 @@ static inline int
 accel_mlx5_encrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 {
 	struct accel_mlx5_klm klm;
-	struct spdk_mlx5_crypto_dek_data dek_data;
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
@@ -1123,15 +1117,10 @@ accel_mlx5_encrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, mlx5_task->qp, &task->s.iovs[0],
 				task->src_domain, task->src_domain_ctx, &src_lkey);
 	}
-	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, dev->pd_ref, &dek_data);
-	if (spdk_unlikely(rc)) {
-		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
-		return rc;
-	}
 
 	SPDK_DEBUGLOG(accel_mlx5, "begin, task, %p, reqs: total %u, submitted %u, completed %u\n",
 		      mlx5_task, mlx5_task->num_reqs, mlx5_task->num_submitted_reqs, mlx5_task->num_completed_reqs);
-	rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &dek_data, &klm, mlx5_task->mkeys[0]->mkey,
+	rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &klm, mlx5_task->mkeys[0]->mkey,
 					     src_lkey, 0, mlx5_task->blocks_per_req,
 					     (uint64_t)mlx5_task, SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
 	if (spdk_unlikely(rc)) {
@@ -1156,7 +1145,6 @@ static inline int
 accel_mlx5_decrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 {
 	struct accel_mlx5_klm klm;
-	struct spdk_mlx5_crypto_dek_data dek_data;
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
@@ -1171,17 +1159,12 @@ accel_mlx5_decrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, mlx5_task->qp, &task->d.iovs[0],
 				task->dst_domain, task->dst_domain_ctx, &dst_lkey);
 	}
-	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, dev->pd_ref, &dek_data);
-	if (spdk_unlikely(rc)) {
-		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
-		return rc;
-	}
 
 	SPDK_DEBUGLOG(accel_mlx5, "begin, task, %p, reqs: total %u, submitted %u, completed %u\n",
 		      mlx5_task, mlx5_task->num_reqs, mlx5_task->num_submitted_reqs, mlx5_task->num_completed_reqs);
 	/* This is inplace task where mlx5_task::src poinst to task::d.iovs. dst_lkey describes mlx5_task::src,
 	 * so it is passed to the function below as src_lkey parameter */
-	rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &dek_data, &klm, mlx5_task->mkeys[0]->mkey,
+	rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &klm, mlx5_task->mkeys[0]->mkey,
 					     dst_lkey, 0, mlx5_task->blocks_per_req,
 					     (uint64_t)mlx5_task, SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
 	if (spdk_unlikely(rc)) {
@@ -1206,7 +1189,6 @@ static inline int
 accel_mlx5_configure_crypto_and_sig_umr(struct accel_mlx5_task *mlx5_task,
 					struct spdk_accel_task *task,
 					struct accel_mlx5_qp *qp,
-					struct spdk_mlx5_crypto_dek_data *dek_data,
 					struct accel_mlx5_klm *klm, struct spdk_mlx5_mkey_pool_obj *mkey,
 					uint32_t src_lkey, uint32_t dst_lkey,
 					enum spdk_mlx5_umr_sig_domain sig_domain, uint32_t psv_index,
@@ -1278,8 +1260,8 @@ accel_mlx5_configure_crypto_and_sig_umr(struct accel_mlx5_task *mlx5_task,
 	}
 	cattr.xts_iv = iv;
 	cattr.keytag = 0;
-	cattr.dek_obj_id = dek_data->dek_obj_id;
-	cattr.tweak_mode = dek_data->tweak_mode;
+	cattr.dek_obj_id = mlx5_task->dek_obj_id;
+	cattr.tweak_mode = mlx5_task->tweak_mode;
 
 	sattr.seed = crc_seed ^ UINT32_MAX;
 	sattr.psv_index = psv_index;
@@ -1306,7 +1288,6 @@ static inline int
 accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 {
 	struct accel_mlx5_klm klms[ACCEL_MLX5_MAX_MKEYS_IN_TASK];
-	struct spdk_mlx5_crypto_dek_data dek_data;
 	struct spdk_accel_task *task;
 	struct spdk_accel_task *task_crc;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
@@ -1334,12 +1315,6 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 
 	if (spdk_unlikely(!num_ops)) {
 		return -EINVAL;
-	}
-
-	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, qp->dev->pd_ref, &dek_data);
-	if (spdk_unlikely(rc)) {
-		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
-		return rc;
 	}
 
 	if (ops_len <= mlx5_task->src.iov->iov_len - mlx5_task->src.iov_offset || task->s.iovcnt == 1) {
@@ -1389,7 +1364,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 		 *      Mem sig(xts(data)) -> Wire (data). Configuring signature on Wire is not allowed in this case.
 		 *      BSF.enc_order is encrypted_raw_memory.
 		 */
-		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, task, qp, &dek_data, &klms[i],
+		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, task, qp, &klms[i],
 				mlx5_task->mkeys[i],
 				src_lkey, dst_lkey,
 				SPDK_MLX5_UMR_SIG_DOMAIN_WIRE,
@@ -1496,7 +1471,6 @@ static inline int
 accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 {
 	struct accel_mlx5_klm klms[ACCEL_MLX5_MAX_MKEYS_IN_TASK];
-	struct spdk_mlx5_crypto_dek_data dek_data;
 	struct accel_mlx5_task *mlx5_task_crypto;
 	struct spdk_accel_task *task_crypto;
 	struct spdk_accel_task *task_crc;
@@ -1527,12 +1501,6 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 
 	if (spdk_unlikely(!num_ops)) {
 		return -EINVAL;
-	}
-
-	rc = spdk_mlx5_crypto_get_dek_data(task_crypto->crypto_key->priv, qp->dev->pd_ref, &dek_data);
-	if (spdk_unlikely(rc)) {
-		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
-		return rc;
 	}
 
 	if (ops_len <= mlx5_task->src.iov->iov_len - mlx5_task->src.iov_offset ||
@@ -1583,7 +1551,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 		 *      Mem sig(xts(data)) -> Wire (data). Configuring signature on Wire is not allowed in this case.
 		 *      BSF.enc_order is encrypted_raw_memory.
 		 */
-		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, task_crypto, qp, &dek_data, &klms[i],
+		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, task_crypto, qp, &klms[i],
 				mlx5_task->mkeys[i],
 				src_lkey, dst_lkey,
 				SPDK_MLX5_UMR_SIG_DOMAIN_MEMORY,
@@ -2672,11 +2640,13 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
+	struct spdk_mlx5_crypto_dek_data dek_data;
 #ifdef DEBUG
 	size_t dst_nbytes = 0;
 	uint32_t i;
 #endif
 	uint32_t num_blocks;
+	int rc;
 	bool crypto_key_ok;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
@@ -2697,6 +2667,14 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 		}
 		return -EINVAL;
 	}
+
+	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, dev->pd_ref, &dek_data);
+	if (spdk_unlikely(rc)) {
+		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
+		return rc;
+	}
+	mlx5_task->dek_obj_id = dek_data.dek_obj_id;
+	mlx5_task->tweak_mode = dek_data.tweak_mode;
 
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, task->s.iovs, task->s.iovcnt);
 	num_blocks = task->nbytes / mlx5_task->base.block_size;
@@ -2761,6 +2739,7 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
+	struct spdk_mlx5_crypto_dek_data dek_data;
 	uint32_t num_blocks;
 	int rc;
 	bool crypto_key_ok;
@@ -2790,6 +2769,14 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 		}
 		return -EINVAL;
 	}
+
+	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, dev->pd_ref, &dek_data);
+	if (spdk_unlikely(rc)) {
+		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
+		return rc;
+	}
+	mlx5_task->dek_obj_id = dek_data.dek_obj_id;
+	mlx5_task->tweak_mode = dek_data.tweak_mode;
 
 	num_blocks = task->nbytes / mlx5_task->base.block_size;
 	if (dev->crypto_multi_block) {
@@ -2834,6 +2821,7 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
+	struct spdk_mlx5_crypto_dek_data dek_data;
 	uint32_t num_blocks;
 	int rc;
 	bool crypto_key_ok;
@@ -2863,6 +2851,14 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 		}
 		return -EINVAL;
 	}
+
+	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, dev->pd_ref, &dek_data);
+	if (spdk_unlikely(rc)) {
+		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
+		return rc;
+	}
+	mlx5_task->dek_obj_id = dek_data.dek_obj_id;
+	mlx5_task->tweak_mode = dek_data.tweak_mode;
 
 	num_blocks = task->nbytes / mlx5_task->base.block_size;
 	if (dev->crypto_multi_block) {
@@ -2937,7 +2933,10 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
+	struct spdk_mlx5_crypto_dek_data dek_data;
 	uint32_t num_blocks;
+	int rc;
+	bool crypto_key_ok;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
@@ -2945,6 +2944,26 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 		SPDK_ERRLOG("Can't handle driver seq with accel memory domain\n");
 		return -ENOTSUP;
 	}
+
+	crypto_key_ok = (task->crypto_key && task->crypto_key->module_if == &g_accel_mlx5.module &&
+			 task->crypto_key->priv);
+	if (spdk_unlikely((task->nbytes % mlx5_task->base.block_size != 0) || !crypto_key_ok)) {
+		if (crypto_key_ok) {
+			SPDK_ERRLOG("dst length %"PRIu64" is not a multiple of the block size %u\n", task->nbytes,
+				    mlx5_task->base.block_size);
+		} else {
+			SPDK_ERRLOG("Wrong crypto key provided\n");
+		}
+		return -EINVAL;
+	}
+
+	rc = spdk_mlx5_crypto_get_dek_data(task->crypto_key->priv, dev->pd_ref, &dek_data);
+	if (spdk_unlikely(rc)) {
+		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
+		return rc;
+	}
+	mlx5_task->dek_obj_id = dek_data.dek_obj_id;
+	mlx5_task->tweak_mode = dek_data.tweak_mode;
 
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, mlx5_task->base.s.iovs, mlx5_task->base.s.iovcnt);
 	if (!mlx5_task->flags.bits.inplace) {
@@ -2981,7 +3000,10 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_accel_task *task_crypto;
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
+	struct spdk_mlx5_crypto_dek_data dek_data;
 	uint32_t num_blocks;
+	int rc;
+	bool crypto_key_ok;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
@@ -2992,6 +3014,27 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 
 	task_crypto = TAILQ_NEXT(task, seq_link);
 	assert(task_crypto);
+
+	crypto_key_ok = (task_crypto->crypto_key &&
+			 task_crypto->crypto_key->module_if == &g_accel_mlx5.module &&
+			 task_crypto->crypto_key->priv);
+	if (spdk_unlikely((task->nbytes % task_crypto->block_size != 0) || !crypto_key_ok)) {
+		if (crypto_key_ok) {
+			SPDK_ERRLOG("dst length %"PRIu64" is not a multiple of the block size %u\n", task->nbytes,
+				    task_crypto->block_size);
+		} else {
+			SPDK_ERRLOG("Wrong crypto key provided\n");
+		}
+		return -EINVAL;
+	}
+
+	rc = spdk_mlx5_crypto_get_dek_data(task_crypto->crypto_key->priv, dev->pd_ref, &dek_data);
+	if (spdk_unlikely(rc)) {
+		SPDK_ERRLOG("failed to get DEK data, rc %d\n", rc);
+		return rc;
+	}
+	mlx5_task->dek_obj_id = dek_data.dek_obj_id;
+	mlx5_task->tweak_mode = dek_data.tweak_mode;
 
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, task_crypto->s.iovs, task_crypto->s.iovcnt);
 	if (!mlx5_task->flags.bits.inplace) {
