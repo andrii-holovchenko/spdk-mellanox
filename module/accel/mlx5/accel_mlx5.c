@@ -128,15 +128,26 @@ struct accel_mlx5_psv_wrapper {
 
 struct accel_mlx5_task {
 	struct spdk_accel_task base;
+	struct accel_mlx5_iov_sgl src;
+	struct accel_mlx5_iov_sgl dst;
+	STAILQ_ENTRY(accel_mlx5_task) link;
 	struct accel_mlx5_qp *qp;
-	uint16_t num_reqs;
-	uint16_t num_completed_reqs;
-	uint16_t num_submitted_reqs;
-	/* If set, memory data will be encrypted during TX and wire data will be
-	 decrypted during RX.
-	 If not set, memory data will be decrypted during TX and wire data will
-	 be encrypted during RX. */
-	uint8_t enc_order;
+	struct accel_mlx5_psv_wrapper *psv;
+	union {
+		/* The struct is used for crypto */
+		struct {
+			/* Number of data blocks per crypto operation */
+			uint16_t blocks_per_req;
+			/* total num_blocks in this task */
+			uint16_t num_blocks;
+			uint16_t num_processed_blocks;
+		};
+		/* The struct is used for crc/check_crc */
+		struct {
+			uint32_t last_umr_len;
+			uint16_t last_mkey_idx;
+		};
+	};
 	union {
 		uint8_t raw;
 		struct {
@@ -147,37 +158,27 @@ struct accel_mlx5_task {
 			uint8_t driver_seq : 1;
 			/* The user requesteed to register mkey, without DMA operation */
 			uint8_t driver_mkey : 1;
-			uint8_t reserved : 4;
+			/* If set, memory data will be encrypted during TX and wire data will be
+			 decrypted during RX.
+			 If not set, memory data will be decrypted during TX and wire data will
+			 be encrypted during RX. */
+			uint8_t enc_order : 2;
+			uint8_t reserved : 2;
 		} bits;
 	} flags;
 	uint8_t mlx5_opcode;
+
+	uint16_t num_reqs;
+	uint16_t num_completed_reqs;
+	uint16_t num_submitted_reqs;
 	uint16_t num_wrs;
-	union {
-		/* The struct is used for crypto */
-		struct {
-			/* Number of data blocks per crypto operation */
-			uint16_t blocks_per_req;
-			/* total num_blocks in this task */
-			uint16_t num_blocks;
-			uint16_t num_processed_blocks;
-		};
-		uint32_t last_umr_len;
-	};
 	/* for crypto op - number of allocated mkeys
 	 * for crypto and copy - number of operations allowed to be submitted to qp */
 	uint16_t num_ops;
-	uint16_t last_mkey_idx;
-	struct accel_mlx5_iov_sgl src;
-	struct accel_mlx5_iov_sgl dst;
-	struct accel_mlx5_psv_wrapper *psv;
-	STAILQ_ENTRY(accel_mlx5_task) link;
 	/* Keep this array last since not all elements might be accessed, this reduces amount of data to be
 	 * cached */
 	struct spdk_mlx5_mkey_pool_obj *mkeys[ACCEL_MLX5_MAX_MKEYS_IN_TASK];
 };
-
-SPDK_STATIC_ASSERT(offsetof(struct accel_mlx5_task, qp) % 64 == 0,
-		   "qp pointer is not cache line aligned");
 
 struct accel_mlx5_qp {
 	struct spdk_mlx5_qp *qp;
@@ -852,7 +853,7 @@ accel_mlx5_configure_crypto_umr(struct accel_mlx5_task *mlx5_task, struct accel_
 	cattr.keytag = 0;
 	cattr.dek_obj_id = dek_data->dek_obj_id;
 	cattr.tweak_mode = dek_data->tweak_mode;
-	cattr.enc_order = mlx5_task->enc_order;
+	cattr.enc_order = mlx5_task->flags.bits.enc_order;
 	cattr.bs_selector = bs_to_bs_selector(block_size);
 	if (spdk_unlikely(!cattr.bs_selector)) {
 		SPDK_ERRLOG("unsupported block size %u\n", block_size);
@@ -921,7 +922,7 @@ accel_mlx5_configure_crypto_umr(struct accel_mlx5_task *mlx5_task, struct accel_
 	}
 	SPDK_DEBUGLOG(accel_mlx5,
 		      "task %p: bs %u, iv %"PRIu64", enc_on_tx %d, tweak_mode %d, len %u, dv_mkey %x, blocks %u\n",
-		      mlx5_task, task->block_size, cattr.xts_iv, mlx5_task->enc_order, cattr.tweak_mode,
+		      mlx5_task, task->block_size, cattr.xts_iv, mlx5_task->flags.bits.enc_order, cattr.tweak_mode,
 		      length, dv_mkey, num_blocks);
 
 	umr_attr.klm_count = klm->src_klm_count;
@@ -1268,8 +1269,8 @@ accel_mlx5_configure_crypto_and_sig_umr(struct accel_mlx5_task *mlx5_task,
 	}
 
 	SPDK_DEBUGLOG(accel_mlx5, "task %p crypto_attr: bs %u, iv %"PRIu64", enc_on_tx %d\n",
-		      mlx5_task, task->block_size, iv, mlx5_task->enc_order);
-	cattr.enc_order = mlx5_task->enc_order;
+		      mlx5_task, task->block_size, iv, mlx5_task->flags.bits.enc_order);
+	cattr.enc_order = mlx5_task->flags.bits.enc_order;
 	cattr.bs_selector = bs_to_bs_selector(task->block_size);
 	if (spdk_unlikely(!cattr.bs_selector)) {
 		SPDK_ERRLOG("unsupported block size %u\n", task->block_size);
@@ -3089,7 +3090,7 @@ accel_mlx5_task_merge_crc_and_decrypt(struct accel_mlx5_task *mlx5_task_crc)
 
 	mlx5_task_crypto->flags.bits.merged = true;
 	mlx5_task_crc->mlx5_opcode = ACCEL_MLX5_OPC_CRC32C_AND_DECRYPT;
-	mlx5_task_crc->enc_order = MLX5_ENCRYPTION_ORDER_ENCRYPTED_RAW_MEMORY;
+	mlx5_task_crc->flags.bits.enc_order = MLX5_ENCRYPTION_ORDER_ENCRYPTED_RAW_MEMORY;
 }
 
 static inline void
@@ -3103,7 +3104,7 @@ accel_mlx5_task_init_opcode(struct accel_mlx5_task *mlx5_task)
 		break;
 	case SPDK_ACCEL_OPC_ENCRYPT:
 		assert(g_accel_mlx5.crypto_supported);
-		mlx5_task->enc_order = MLX5_ENCRYPTION_ORDER_ENCRYPTED_RAW_WIRE;
+		mlx5_task->flags.bits.enc_order = MLX5_ENCRYPTION_ORDER_ENCRYPTED_RAW_WIRE;
 		mlx5_task->mlx5_opcode = mlx5_task->flags.bits.driver_mkey ? ACCEL_MLX5_OPC_ENCRYPT_MKEY :
 					 ACCEL_MLX5_OPC_CRYPTO;
 		if (g_accel_mlx5.merge) {
@@ -3112,7 +3113,7 @@ accel_mlx5_task_init_opcode(struct accel_mlx5_task *mlx5_task)
 		break;
 	case SPDK_ACCEL_OPC_DECRYPT:
 		assert(g_accel_mlx5.crypto_supported);
-		mlx5_task->enc_order = MLX5_ENCRYPTION_ORDER_ENCRYPTED_RAW_MEMORY;
+		mlx5_task->flags.bits.enc_order = MLX5_ENCRYPTION_ORDER_ENCRYPTED_RAW_MEMORY;
 		mlx5_task->mlx5_opcode = mlx5_task->flags.bits.driver_mkey ? ACCEL_MLX5_OPC_DECRYPT_MKEY :
 					 ACCEL_MLX5_OPC_CRYPTO;
 		break;
