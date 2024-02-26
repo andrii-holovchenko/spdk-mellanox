@@ -150,10 +150,16 @@ struct accel_mlx5_task {
 			uint16_t last_mkey_idx;
 		};
 	};
-	struct {
-		uint32_t *crc;
-		uint32_t seed;
-	} encrypt_crc;
+	union {
+		struct {
+			uint32_t *crc;
+			uint32_t seed;
+		} encrypt_crc;
+		struct {
+			uint64_t iv;
+			uint16_t block_size;
+		} crc_decrypt;
+	};
 	union {
 		uint8_t raw;
 		struct {
@@ -1190,14 +1196,14 @@ accel_mlx5_decrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 
 static inline int
 accel_mlx5_configure_crypto_and_sig_umr(struct accel_mlx5_task *mlx5_task,
-					struct spdk_accel_task *task,
 					struct accel_mlx5_qp *qp,
 					struct accel_mlx5_klm *klm, struct spdk_mlx5_mkey_pool_obj *mkey,
 					uint32_t src_lkey, uint32_t dst_lkey,
 					enum spdk_mlx5_umr_sig_domain sig_domain, uint32_t psv_index,
-					uint32_t *crc, uint32_t crc_seed, uint64_t iv, uint32_t req_len,
+					uint32_t *crc, uint32_t crc_seed, uint64_t iv, uint32_t block_size, uint32_t req_len,
 					bool init_signature, bool gen_signature, bool encrypt)
 {
+	struct spdk_accel_task *task = &mlx5_task->base;
 	struct spdk_mlx5_umr_crypto_attr cattr;
 	struct spdk_mlx5_umr_sig_attr sattr;
 	struct spdk_mlx5_umr_attr umr_attr;
@@ -1254,11 +1260,11 @@ accel_mlx5_configure_crypto_and_sig_umr(struct accel_mlx5_task *mlx5_task,
 	}
 
 	SPDK_DEBUGLOG(accel_mlx5, "task %p crypto_attr: bs %u, iv %"PRIu64", enc_on_tx %d\n",
-		      mlx5_task, task->block_size, iv, mlx5_task->flags.bits.enc_order);
+		      mlx5_task, block_size, iv, mlx5_task->flags.bits.enc_order);
 	cattr.enc_order = mlx5_task->flags.bits.enc_order;
-	cattr.bs_selector = bs_to_bs_selector(task->block_size);
+	cattr.bs_selector = bs_to_bs_selector(block_size);
 	if (spdk_unlikely(!cattr.bs_selector)) {
-		SPDK_ERRLOG("unsupported block size %u\n", task->block_size);
+		SPDK_ERRLOG("unsupported block size %u\n", block_size);
 		return -EINVAL;
 	}
 	cattr.xts_iv = iv;
@@ -1316,17 +1322,16 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 		return -EINVAL;
 	}
 
-	if (ops_len <= mlx5_task->src.iov->iov_len - mlx5_task->src.iov_offset || task->s.iovcnt == 1) {
-		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, qp, &task->s.iovs[0],
-				task->src_domain, task->src_domain_ctx,
-				&src_lkey);
+	if (ops_len <= mlx5_task->src.iov->iov_len - mlx5_task->src.iov_offset ||
+	    mlx5_task->src.iovcnt == 1) {
+		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, qp, mlx5_task->src.iov,
+				task->src_domain, task->src_domain_ctx, &src_lkey);
 	}
 	if (!mlx5_task->flags.bits.inplace &&
 	    (ops_len <= mlx5_task->dst.iov->iov_len - mlx5_task->dst.iov_offset ||
-	     task->d.iovcnt == 1)) {
-		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, qp, &task->d.iovs[0],
-				task->dst_domain, task->dst_domain_ctx,
-				&dst_lkey);
+	     mlx5_task->dst.iovcnt == 1)) {
+		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, qp, mlx5_task->dst.iov,
+				task->dst_domain, task->dst_domain_ctx, &dst_lkey);
 	}
 	if (spdk_unlikely(rc)) {
 		return rc;
@@ -1363,13 +1368,13 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 		 *      Mem sig(xts(data)) -> Wire (data). Configuring signature on Wire is not allowed in this case.
 		 *      BSF.enc_order is encrypted_raw_memory.
 		 */
-		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, task, qp, &klms[i],
+		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, qp, &klms[i],
 				mlx5_task->mkeys[i],
 				src_lkey, dst_lkey,
 				SPDK_MLX5_UMR_SIG_DOMAIN_WIRE,
 				mlx5_task->psv->psv_index,
 				mlx5_task->encrypt_crc.crc,
-				mlx5_task->encrypt_crc.seed, iv, req_len,
+				mlx5_task->encrypt_crc.seed, iv, task->block_size, req_len,
 				init_signature, gen_signature,
 				true);
 		if (spdk_unlikely(rc)) {
@@ -1470,9 +1475,7 @@ static inline int
 accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 {
 	struct accel_mlx5_klm klms[ACCEL_MLX5_MAX_MKEYS_IN_TASK];
-	struct accel_mlx5_task *mlx5_task_crypto;
-	struct spdk_accel_task *task_crypto;
-	struct spdk_accel_task *task_crc;
+	struct spdk_accel_task *task;
 	struct accel_mlx5_qp *qp = mlx5_task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
 	uint32_t src_lkey = 0, dst_lkey = 0;
@@ -1491,36 +1494,30 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 	int rc = 0;
 
 	assert(mlx5_task->base.op_code == SPDK_ACCEL_OPC_CHECK_CRC32C);
-	task_crc = &mlx5_task->base;
-	task_crypto = TAILQ_NEXT(task_crc, seq_link);
-	mlx5_task_crypto = SPDK_CONTAINEROF(task_crypto, struct accel_mlx5_task, base);
-
-	assert(task_crypto);
-	assert(task_crc);
+	task = &mlx5_task->base;
+	assert(task);
 
 	if (spdk_unlikely(!num_ops)) {
 		return -EINVAL;
 	}
 
 	if (ops_len <= mlx5_task->src.iov->iov_len - mlx5_task->src.iov_offset ||
-	    task_crypto->s.iovcnt == 1) {
-		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task_crypto, qp, &task_crypto->s.iovs[0],
-				task_crypto->src_domain, task_crypto->src_domain_ctx,
-				&src_lkey);
+	    mlx5_task->src.iovcnt == 1) {
+		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, qp, mlx5_task->src.iov,
+				task->src_domain, task->src_domain_ctx, &src_lkey);
 	}
 	if (!mlx5_task->flags.bits.inplace &&
 	    (ops_len <= mlx5_task->dst.iov->iov_len - mlx5_task->dst.iov_offset ||
-	     task_crypto->d.iovcnt == 1)) {
-		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task_crypto, qp, &task_crypto->d.iovs[0],
-				task_crypto->dst_domain, task_crypto->dst_domain_ctx,
-				&dst_lkey);
+	     mlx5_task->dst.iovcnt == 1)) {
+		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, qp, mlx5_task->dst.iov,
+				task->dst_domain, task->dst_domain_ctx, &dst_lkey);
 	}
 	if (spdk_unlikely(rc)) {
 		return rc;
 	}
 
 	blocks_processed = mlx5_task->num_submitted_reqs * mlx5_task->blocks_per_req;
-	iv = task_crypto->iv + blocks_processed;
+	iv = mlx5_task->crc_decrypt.iv + blocks_processed;
 
 	SPDK_DEBUGLOG(accel_mlx5,
 		      "begin, crc_decrypt task, %p, reqs: total %u, submitted %u, completed %u\n",
@@ -1533,10 +1530,10 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 		if (mlx5_task->num_submitted_reqs + i + 1 == mlx5_task->num_reqs) {
 			/* Last request may consume less than calculated */
 			assert(mlx5_task->num_blocks > blocks_processed);
-			req_len = (mlx5_task->num_blocks - blocks_processed) * task_crypto->block_size;
+			req_len = (mlx5_task->num_blocks - blocks_processed) * mlx5_task->crc_decrypt.block_size;
 			gen_signature = true;
 		} else {
-			req_len = mlx5_task->blocks_per_req * task_crypto->block_size;
+			req_len = mlx5_task->blocks_per_req * mlx5_task->crc_decrypt.block_size;
 		}
 
 		/*
@@ -1550,13 +1547,13 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 		 *      Mem sig(xts(data)) -> Wire (data). Configuring signature on Wire is not allowed in this case.
 		 *      BSF.enc_order is encrypted_raw_memory.
 		 */
-		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, task_crypto, qp, &klms[i],
+		rc = accel_mlx5_configure_crypto_and_sig_umr(mlx5_task, qp, &klms[i],
 				mlx5_task->mkeys[i],
 				src_lkey, dst_lkey,
 				SPDK_MLX5_UMR_SIG_DOMAIN_MEMORY,
 				mlx5_task->psv->psv_index,
-				task_crc->crc_dst,
-				task_crc->seed, iv, req_len,
+				task->crc_dst,
+				task->seed, iv, mlx5_task->crc_decrypt.block_size, req_len,
 				init_signature, gen_signature,
 				false);
 		if (spdk_unlikely(rc)) {
@@ -1573,7 +1570,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 
 	if (spdk_unlikely(mlx5_task->psv->bits.error)) {
-		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, task_crc->seed, 0, 0);
+		rc = spdk_mlx5_set_psv(qp->qp, mlx5_task->psv->psv_index, task->seed, 0, 0);
 		if (spdk_unlikely(rc)) {
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
@@ -3040,6 +3037,23 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 	}
 	mlx5_task->dek_obj_id = dek_data.dek_obj_id;
 	mlx5_task->tweak_mode = dek_data.tweak_mode;
+
+	mlx5_task->crc_decrypt.iv = task_crypto->iv;
+	mlx5_task->crc_decrypt.block_size = task_crypto->block_size;
+
+	/* We are going to store crypto tasks's memory domain pointer into crc task structure. Make sure we don't
+	 * overwrite any values */
+	assert(task->src_domain == NULL);
+	assert(task->src_domain_ctx == NULL);
+	assert(task->dst_domain == NULL);
+	assert(task->dst_domain_ctx == NULL);
+	assert(task->cached_lkey == NULL);
+
+	task->src_domain = task_crypto->src_domain;
+	task->src_domain_ctx = task_crypto->src_domain_ctx;
+	task->dst_domain = task_crypto->dst_domain;
+	task->dst_domain_ctx = task_crypto->dst_domain_ctx;
+	task->cached_lkey = task_crypto->cached_lkey;
 
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, task_crypto->s.iovs, task_crypto->s.iovcnt);
 	if (!mlx5_task->flags.bits.inplace) {

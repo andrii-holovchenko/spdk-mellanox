@@ -1515,6 +1515,8 @@ spdk_accel_append_check_crc32c(struct spdk_accel_sequence **pseq,
 	task->src_domain = src_domain;
 	task->src_domain_ctx = src_domain_ctx;
 	task->dst_domain = NULL;
+	task->dst_domain_ctx = NULL;
+	task->dst_domain = NULL;
 	task->s.iovs = src_iovs;
 	task->s.iovcnt = src_iovcnt;
 	task->nbytes = accel_get_iovlen(src_iovs, src_iovcnt);
