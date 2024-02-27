@@ -66,6 +66,8 @@ struct accel_mlx5_stats {
 	uint64_t polls;
 	uint64_t idle_polls;
 	uint64_t completions;
+	uint64_t nomem_qdepth;
+	uint64_t nomem_mkey;
 	uint64_t opcodes[ACCEL_MLX5_OPC_LAST];
 };
 
@@ -344,6 +346,8 @@ accel_mlx5_add_stats(struct accel_mlx5_stats *stats, const struct accel_mlx5_sta
 	stats->polls += to_add->polls;
 	stats->idle_polls += to_add->idle_polls;
 	stats->completions += to_add->completions;
+	stats->nomem_qdepth += to_add->nomem_qdepth;
+	stats->nomem_mkey += to_add->nomem_mkey;
 	for (i = 0; i < ACCEL_MLX5_OPC_LAST; i++) {
 		stats->opcodes[i] += to_add->opcodes[i];
 	}
@@ -624,6 +628,22 @@ accel_mlx5_compare_iovs(struct iovec *v1, struct iovec *v2, uint32_t iovcnt)
 	return true;
 }
 
+static inline void
+accel_mlx5_dev_nomem_task_qdepth(struct accel_mlx5_dev *dev, struct accel_mlx5_task *task)
+{
+	SPDK_DEBUGLOG(accel_mlx5, "queue task %p, dev %p\n", task, dev);
+	dev->stats.nomem_qdepth++;
+	STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+}
+
+static inline void
+accel_mlx5_dev_nomem_task_mkey(struct accel_mlx5_dev *dev, struct accel_mlx5_task *task)
+{
+	SPDK_DEBUGLOG(accel_mlx5, "queue task %p, dev %p\n", task, dev);
+	dev->stats.nomem_mkey++;
+	STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+}
+
 static inline int
 accel_mlx5_task_alloc_mkeys(struct accel_mlx5_task *task, void *mkey_pool)
 {
@@ -639,15 +659,17 @@ accel_mlx5_task_alloc_mkeys(struct accel_mlx5_task *task, void *mkey_pool)
 	assert(task->mlx5_opcode != ACCEL_MLX5_OPC_COPY);
 	num_ops = spdk_min(num_ops, qp_slot);
 	num_ops = spdk_min(num_ops, ACCEL_MLX5_MAX_MKEYS_IN_TASK * 2);
-	if (num_ops < 2) {
+	if (spdk_unlikely(num_ops < 2)) {
 		/* We must do at least 1 UMR and 1 RDMA operation */
 		task->num_ops = 0;
+		accel_mlx5_dev_nomem_task_qdepth(qp->dev, task);
 		return -ENOMEM;
 	}
 	num_mkeys = num_ops / 2;
 	rc = spdk_mlx5_mkey_pool_get_bulk(mkey_pool, task->mkeys, num_mkeys);
 	if (spdk_unlikely(rc)) {
 		task->num_ops = 0;
+		accel_mlx5_dev_nomem_task_mkey(qp->dev, task);
 		return -ENOMEM;
 	}
 	task->num_ops = num_mkeys;
@@ -2057,6 +2079,7 @@ accel_mlx5_task_alloc_crc_ctx(struct accel_mlx5_task *task, void *mkey_pool)
 		SPDK_DEBUGLOG(accel_mlx5, "no reqs in psv pool, dev %s\n", dev->pd_ref->context->device->name);
 		spdk_mlx5_mkey_pool_put_bulk(mkey_pool, task->mkeys, task->num_ops);
 		task->num_ops = 0;
+		accel_mlx5_dev_nomem_task_mkey(qp->dev, task);
 		return -ENOMEM;
 	}
 	/* One extra slot is needed for SET_PSV WQE to reset the error state in PSV. */
@@ -2068,6 +2091,7 @@ accel_mlx5_task_alloc_crc_ctx(struct accel_mlx5_task *task, void *mkey_pool)
 			spdk_mempool_put(dev->psv_pool_ref, task->psv);
 			spdk_mlx5_mkey_pool_put_bulk(mkey_pool, task->mkeys, task->num_ops);
 			task->num_ops = 0;
+			accel_mlx5_dev_nomem_task_qdepth(qp->dev, task);
 			return -ENOMEM;
 		}
 	}
@@ -2086,16 +2110,14 @@ accel_mlx5_crypto_task_continue(struct accel_mlx5_task *task)
 	if (task->num_ops == 0) {
 		rc = accel_mlx5_task_alloc_mkeys(task, dev->crypto_mkeys);
 		if (spdk_unlikely(rc != 0)) {
-			/* Pool is empty, queue this task */
-			STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+			accel_mlx5_dev_nomem_task_mkey(dev, task);
 			return -ENOMEM;
 		}
 	}
 	/* Check that we have enough slots in QP */
 	num_ops = spdk_min(num_ops, 2 * task->num_ops);
-	if (num_ops > qp_slot) {
-		/* qp is full, queue this task */
-		STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+	if (spdk_unlikely(num_ops > qp_slot)) {
+		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
 
@@ -2112,14 +2134,13 @@ accel_mlx5_encrypt_mkey_task_continue(struct accel_mlx5_task *task)
 	if (task->num_ops == 0) {
 		rc = spdk_mlx5_mkey_pool_get_bulk(dev->crypto_mkeys, task->mkeys, 1);
 		if (spdk_unlikely(rc)) {
-			STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+			accel_mlx5_dev_nomem_task_mkey(dev, task);
 			return -ENOMEM;
 		}
 		task->num_ops = 1;
 	}
-	if (qp->max_wrs == qp->wrs_submitted) {
-		/* QP is full, queue this task */
-		STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
+		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
 	return accel_mlx5_encrypt_mkey_task_process(task);
@@ -2135,14 +2156,13 @@ accel_mlx5_decrypt_mkey_task_continue(struct accel_mlx5_task *task)
 	if (task->num_ops == 0) {
 		rc = spdk_mlx5_mkey_pool_get_bulk(dev->crypto_mkeys, task->mkeys, 1);
 		if (spdk_unlikely(rc)) {
-			STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+			accel_mlx5_dev_nomem_task_mkey(dev, task);
 			return -ENOMEM;
 		}
 		task->num_ops = 1;
 	}
-	if (qp->max_wrs == qp->wrs_submitted) {
-		/* QP is full, queue this task */
-		STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
+		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
 	return accel_mlx5_decrypt_mkey_task_process(task);
@@ -2160,16 +2180,13 @@ accel_mlx5_crc_task_continue(struct accel_mlx5_task *task)
 	if (task->num_ops == 0) {
 		rc = accel_mlx5_task_alloc_crc_ctx(task, dev->sig_mkeys);
 		if (spdk_unlikely(rc != 0)) {
-			/* Pool is empty, queue this task */
-			STAILQ_INSERT_TAIL(&dev->nomem, task, link);
-			return -ENOMEM;
+			return rc;
 		}
 	}
 	/* Check that we have enough slots in QP */
 	num_ops = spdk_min(num_ops, 2 * task->num_ops);
-	if (num_ops > qp_slot) {
-		/* qp is full, queue this task */
-		STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+	if (spdk_unlikely(num_ops > qp_slot)) {
+		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
 
@@ -2188,16 +2205,13 @@ accel_mlx5_crypto_crc_task_continue_init(struct accel_mlx5_task *task)
 	if (task->num_ops == 0) {
 		rc = accel_mlx5_task_alloc_crc_ctx(task, dev->crypto_sig_mkeys);
 		if (spdk_unlikely(rc != 0)) {
-			/* Pool is empty, queue this task */
-			STAILQ_INSERT_TAIL(&dev->nomem, task, link);
-			return -ENOMEM;
+			return rc;
 		}
 	}
 	/* Check that we have enough slots in QP */
 	num_ops = spdk_min(num_ops, 2 * task->num_ops);
-	if (num_ops > qp_slot) {
-		/* qp is full, queue this task */
-		STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+	if (spdk_unlikely(num_ops > qp_slot)) {
+		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
 
@@ -2210,7 +2224,7 @@ accel_mlx5_encrypt_and_crc_task_continue(struct accel_mlx5_task *task)
 	int rc;
 
 	rc = accel_mlx5_crypto_crc_task_continue_init(task);
-	if (rc) {
+	if (spdk_unlikely(rc)) {
 		return rc;
 	}
 
@@ -2223,7 +2237,7 @@ accel_mlx5_crc_and_decrypt_task_continue(struct accel_mlx5_task *task)
 	int rc;
 
 	rc = accel_mlx5_crypto_crc_task_continue_init(task);
-	if (rc) {
+	if (spdk_unlikely(rc)) {
 		return rc;
 	}
 
@@ -2238,9 +2252,8 @@ accel_mlx5_copy_task_continue(struct accel_mlx5_task *task)
 	uint16_t qp_slot = qp->max_wrs - qp->wrs_submitted;
 
 	task->num_ops = spdk_min(qp_slot, task->num_reqs - task->num_completed_reqs);
-	if (task->num_ops == 0) {
-		/* qp is full, queue this task */
-		STAILQ_INSERT_TAIL(&dev->nomem, task, link);
+	if (spdk_unlikely(task->num_ops == 0)) {
+		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
 	return accel_mlx5_copy_task_process(task);
@@ -2590,7 +2603,8 @@ accel_mlx5_copy_task_init(struct accel_mlx5_task *mlx5_task)
 	accel_mlx5_iov_sgl_init(&mlx5_task->src, task->s.iovs, task->s.iovcnt);
 	accel_mlx5_iov_sgl_init(&mlx5_task->dst, task->d.iovs, task->d.iovcnt);
 	mlx5_task->num_ops = spdk_min(qp_slot, mlx5_task->num_reqs);
-	if (!mlx5_task->num_ops) {
+	if (spdk_unlikely(!mlx5_task->num_ops)) {
+		accel_mlx5_dev_nomem_task_qdepth(mlx5_task->qp->dev, mlx5_task);
 		return -ENOMEM;
 	}
 	SPDK_DEBUGLOG(accel_mlx5, "copy task num_reqs %u, num_ops %u\n", mlx5_task->num_reqs,
@@ -2761,14 +2775,15 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	mlx5_task->num_reqs = 1;
 	mlx5_task->blocks_per_req = num_blocks;
 
-	if (qp->max_wrs == qp->wrs_submitted) {
-		/* QP is full */
+	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
 		mlx5_task->num_ops = 0;
+		accel_mlx5_dev_nomem_task_qdepth(dev, mlx5_task);
 		return -ENOMEM;
 	}
 	rc = spdk_mlx5_mkey_pool_get_bulk(dev->crypto_mkeys, mlx5_task->mkeys, 1);
 	if (spdk_unlikely(rc)) {
 		mlx5_task->num_ops = 0;
+		accel_mlx5_dev_nomem_task_mkey(dev, mlx5_task);
 		return -ENOMEM;
 	}
 	mlx5_task->num_ops = 1;
@@ -2844,14 +2859,15 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	mlx5_task->num_reqs = 1;
 	mlx5_task->blocks_per_req = num_blocks;
 
-	if (qp->max_wrs == qp->wrs_submitted) {
-		/* QP is full */
+	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
 		mlx5_task->num_ops = 0;
+		accel_mlx5_dev_nomem_task_qdepth(dev, mlx5_task);
 		return -ENOMEM;
 	}
 	rc = spdk_mlx5_mkey_pool_get_bulk(dev->crypto_mkeys, mlx5_task->mkeys, 1);
 	if (spdk_unlikely(rc)) {
 		mlx5_task->num_ops = 0;
+		accel_mlx5_dev_nomem_task_mkey(qp->dev, mlx5_task);
 		return -ENOMEM;
 	}
 	mlx5_task->num_ops = 1;
@@ -2867,6 +2883,7 @@ accel_mlx5_crc_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
 	struct accel_mlx5_dev *dev = mlx5_task->qp->dev;
+	int rc;
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
@@ -2885,8 +2902,9 @@ accel_mlx5_crc_task_init(struct accel_mlx5_task *mlx5_task)
 				      mlx5_task->dst.iov, mlx5_task->dst.iovcnt);
 	}
 
-	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->sig_mkeys))) {
-		return -ENOMEM;
+	rc = accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->sig_mkeys);
+	if (spdk_unlikely(rc)) {
+		return rc;
 	}
 
 	return 0;
@@ -2958,8 +2976,9 @@ accel_mlx5_encrypt_and_crc_task_init(struct accel_mlx5_task *mlx5_task)
 	/* We stored all necessary info about next task, now we can complete it to re-use as fast as possible */
 	spdk_accel_task_complete(task_crc, 0);
 
-	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys))) {
-		return -ENOMEM;
+	rc = accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys);
+	if (spdk_unlikely(rc)) {
+		return rc;
 	}
 	SPDK_DEBUGLOG(accel_mlx5, "crypto and crc task num_reqs %u, num_ops %u, num_blocks %u\n",
 		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks);
@@ -3049,9 +3068,9 @@ accel_mlx5_crc_and_decrypt_task_init(struct accel_mlx5_task *mlx5_task)
 	/* We stored all necessary info about next task, now we can complete it to re-use as fast as possible */
 	spdk_accel_task_complete(task_crypto, 0);
 
-
-	if (spdk_unlikely(accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys))) {
-		return -ENOMEM;
+	rc = accel_mlx5_task_alloc_crc_ctx(mlx5_task, dev->crypto_sig_mkeys);
+	if (spdk_unlikely(rc)) {
+		return rc;
 	}
 	SPDK_DEBUGLOG(accel_mlx5, "crypto and crc task num_reqs %u, num_ops %u, num_blocks %u\n",
 		      mlx5_task->num_reqs, mlx5_task->num_ops, mlx5_task->num_blocks);
@@ -3300,9 +3319,6 @@ accel_mlx5_submit_tasks(struct spdk_io_channel *_ch, struct spdk_accel_task *tas
 	rc = g_accel_mlx5_tasks_ops[mlx5_task->mlx5_opcode].init(mlx5_task);
 	if (spdk_unlikely(rc)) {
 		if (rc == -ENOMEM) {
-			SPDK_DEBUGLOG(accel_mlx5, "no reqs to handle new task %p (required %u), put to queue\n", mlx5_task,
-				      mlx5_task->num_reqs);
-			STAILQ_INSERT_TAIL(&dev->nomem, mlx5_task, link);
 			return 0;
 		}
 		SPDK_ERRLOG("Task opc %d init failed, rc %d\n", task->op_code, rc);
@@ -3509,6 +3525,7 @@ accel_mlx5_process_cpls_siglast(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_
 					if (rc != -ENOMEM) {
 						accel_mlx5_task_fail(task, rc);
 					}
+					break;
 				}
 				dev->wrs_in_cq += task->num_wrs;
 			}
@@ -3575,6 +3592,7 @@ accel_mlx5_process_cpls(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_completi
 				if (rc != -ENOMEM) {
 					accel_mlx5_task_fail(task, rc);
 				}
+				break;
 			}
 			dev->wrs_in_cq += task->num_wrs;
 		}
@@ -3616,12 +3634,11 @@ accel_mlx5_resubmit_nomem_tasks(struct accel_mlx5_dev *dev)
 	STAILQ_FOREACH_SAFE(task, &dev->nomem, link, tmp) {
 		STAILQ_REMOVE_HEAD(&dev->nomem, link);
 		rc = accel_mlx5_task_continue(task);
-		if (rc) {
-			if (rc == -ENOMEM) {
-				break;
-			} else {
+		if (spdk_unlikely(rc)) {
+			if (rc != -ENOMEM) {
 				accel_mlx5_task_fail(task, rc);
 			}
+			break;
 		}
 		dev->wrs_in_cq += task->num_wrs;
 		/* If qpair is recovering, task is added back to the nomem list and 0 is returned. In that case we
@@ -4633,6 +4650,8 @@ accel_mlx5_dump_stats_json(struct spdk_json_write_ctx *w, const char *header,
 	spdk_json_write_named_uint64(w, "completions", stats->completions);
 	spdk_json_write_named_double(w, "idle_polls_percentage", idle_polls_percentage);
 	spdk_json_write_named_double(w, "cpls_per_poll", cpls_per_poll);
+	spdk_json_write_named_uint64(w, "nomem_qdepth", stats->nomem_qdepth);
+	spdk_json_write_named_uint64(w, "nomem_mkey", stats->nomem_mkey);
 	spdk_json_write_object_end(w);
 
 	spdk_json_write_named_object_begin(w, "tasks");
