@@ -72,6 +72,12 @@ def clear_bdev_subsystem(args, bdev_config):
     rpc.bdev.bdev_nvme_set_hotplug(args.client, False)
 
 
+def clear_bdev_group_subsystem(args, bdev_group_config):
+    bdev_groups = args.client.call("bdev_groups_get")
+    for bdev_grp in bdev_groups:
+        args.client.call('bdev_group_delete', {'name': bdev_grp['name']})
+
+
 def get_nvmf_destroy_method(nvmf):
     delete_method_map = {'nvmf_create_subsystem': "nvmf_delete_subsystem"}
     try:

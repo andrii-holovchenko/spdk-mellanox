@@ -307,14 +307,23 @@ function gather_supported_nvmf_pci_devs() {
 	mlx+=(${pci_bus_cache["$mellanox:0x1021"]})
 	# BlueField 2
 	mlx+=(${pci_bus_cache["$mellanox:0xa2d6"]})
+	# ConnectX-6 VPI
+	mlx+=(${pci_bus_cache["$mellanox:0x101b"]})
+	mlx+=(${pci_bus_cache["$mellanox:0x101c"]})
 	# ConnectX-6 Dx
 	mlx+=(${pci_bus_cache["$mellanox:0x101d"]})
+    mlx+=(${pci_bus_cache["$mellanox:0x101e"]})
+	# ConnectX-6 LX
+	mlx+=(${pci_bus_cache["$mellanox:0x101f"]})
 	# ConnectX-5
 	mlx+=(${pci_bus_cache["$mellanox:0x1017"]})
 	mlx+=(${pci_bus_cache["$mellanox:0x1019"]})
 	# ConnectX-4
 	mlx+=(${pci_bus_cache["$mellanox:0x1015"]})
 	mlx+=(${pci_bus_cache["$mellanox:0x1013"]})
+	# ConnectX-4 LX
+	mlx+=(${pci_bus_cache["$mellanox:0x1015"]})
+	mlx+=(${pci_bus_cache["$mellanox:0x1016"]})
 
 	pci_devs+=("${e810[@]}")
 	if [[ $TEST_TRANSPORT == rdma ]]; then

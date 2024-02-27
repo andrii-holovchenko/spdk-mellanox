@@ -1,0 +1,33 @@
+stages:
+    - build
+    - test
+    - cleanup
+      # TO BE FIXED: prepare, build, test
+      #
+
+prepare-job:
+    stage: build
+    tags: [ mtr, linux, x86_64, f39 ]
+    variables:
+        GIT_SUBMODULE_STRATEGY: recursive
+    script:
+        - echo "*** Patch ./CONFIG ***"
+        - patch -p1 < $HOME/spdk-local-config.diff
+        - echo "*** Patch test/nvme/nvme.sh (disable RESET) ***"
+        - patch -p1 < $HOME/spdk-test-nvme.diff
+        # - sudo git config --global --add safe.directory .
+        - git tag v24.01-ci-$CI_JOB_ID
+        # - git submodule update --init
+        - ./configure --with-fio=/work/fio/ --with-rdma=mlx5_dv
+        - make -j6
+
+test-job:
+    stage: test
+    tags: [ mtr, linux, x86_64, f39 ]
+    variables:
+        GIT_CHECKOUT: "false"
+        GIT_CLEAN_FLAGS: "none"
+    script:
+        - sudo ./autotest.sh $HOME/autorun-spdk.conf
+        - sudo chown -R $USER $CI_PROJECT_DIR
+

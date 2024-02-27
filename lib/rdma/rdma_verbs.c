@@ -193,4 +193,5 @@ spdk_rdma_accel_seq_get_translation(void *rdma_io_ctx,
 int
 spdk_rdma_accel_sequence_release(struct spdk_rdma_qp *qp, void *_rdma_io_ctx)
 {
+    return -ENOTSUP;
 }
