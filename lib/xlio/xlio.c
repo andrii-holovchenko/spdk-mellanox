@@ -233,14 +233,9 @@ spdk_xlio_fini(void)
 #ifndef SPDK_CONFIG_STATIC_XLIO
 		xlio_unload();
 		g_xlio_api = NULL;
-#else
-		int rc = xlio_exit();
-		if (rc) {
-			SPDK_ERRLOG("xlio_exit rc %d (errno=%d)\n", rc, errno);
-		}
 #endif
 		g_initialized = false;
 	} else {
-		SPDK_ERRLOG("XLIO is not initialized\n");
+		SPDK_NOTICELOG("XLIO is not initialized\n");
 	}
 }
