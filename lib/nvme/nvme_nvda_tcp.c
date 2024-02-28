@@ -3086,7 +3086,7 @@ end:
 	}
 
 	pdu->has_mkeys = !nvme_qpair_is_admin_queue(&tqpair->qpair) &&
-			 &tcp_req->req != tqpair->qpair.reserved_req;
+			 &tcp_req->req != tqpair->qpair.reserved_req && pdu->data_len;
 
 	tqpair->stats->submitted_requests++;
 	xlio_sock_writev_async(&tqpair->sock, pdu);
