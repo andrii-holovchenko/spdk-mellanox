@@ -1188,7 +1188,6 @@ poll_no_group_socket(struct spdk_xlio_sock *sock)
 	 */
 	if (!sock->ring_fd) {
 		int ring_fds[2];
-		int num_rings;
 
 		ret = xlio_get_socket_rings_fds(sock->fd, ring_fds, 2);
 		if (ret < 0) {
@@ -1197,9 +1196,8 @@ poll_no_group_socket(struct spdk_xlio_sock *sock)
 			return ret;
 		}
 
-		num_rings = ret;
 		/* @todo: add support for multiple rings */
-		assert(num_rings == 1);
+		assert(ret == 1);
 		sock->ring_fd = calloc(1, sizeof(struct spdk_xlio_ring_fd));
 		if (!sock->ring_fd) {
 			SPDK_ERRLOG("Failed to allocate ring_fd\n");
@@ -1207,8 +1205,8 @@ poll_no_group_socket(struct spdk_xlio_sock *sock)
 		}
 		sock->ring_fd->ring_fd = ring_fds[0];
 		sock->ring_fd->refs = 1;
-		SPDK_NOTICELOG("Discovered ring fd %d for socket %d, num_rings %d\n",
-			       sock->ring_fd->ring_fd, sock->fd, num_rings);
+		SPDK_DEBUGLOG(nvme, "Discovered ring fd %d for socket %p %d, num_rings %d\n",
+			      sock->ring_fd->ring_fd, sock, sock->fd, ret);
 	}
 
 	if (sock->xlio_packets_pool->num_free_packets) {
@@ -5339,11 +5337,9 @@ nvme_tcp_qpair_connect_sock_done(struct spdk_xlio_sock *vsock, int err)
 	}
 
 	if (tcp_mem_domain) {
-		SPDK_NOTICELOG("Using TCP memory domain\n");
 		tqpair->memory_domain = spdk_rdma_utils_get_memory_domain(vsock->pd,
 					SPDK_DMA_DEVICE_TYPE_RDMA_TCP);
 	} else {
-		SPDK_NOTICELOG("Using RDMA memory domain\n");
 		tqpair->memory_domain = spdk_rdma_utils_get_memory_domain(vsock->pd,
 					SPDK_DMA_DEVICE_TYPE_RDMA);
 	}
@@ -5353,7 +5349,7 @@ nvme_tcp_qpair_connect_sock_done(struct spdk_xlio_sock *vsock, int err)
 		goto fail;
 	}
 
-	SPDK_NOTICELOG("TCP qpair %p %u, PD %p\n", tqpair, tqpair->qpair.id, vsock->pd);
+	SPDK_DEBUGLOG(nvme, "TCP qpair %p %u, PD %p\n", tqpair, tqpair->qpair.id, vsock->pd);
 
 	tqpair->mem_map = spdk_rdma_utils_create_mem_map(vsock->pd, NULL,
 			  IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
