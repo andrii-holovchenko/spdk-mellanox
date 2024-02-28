@@ -1,5 +1,6 @@
 /*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (C) 2023 Intel Corporation.
+ *   Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
  *   All rights reserved.
  */
 
@@ -12,7 +13,7 @@
 #define IOBUF_MIN_SMALL_POOL_SIZE	64
 #define IOBUF_MIN_LARGE_POOL_SIZE	8
 #define IOBUF_DEFAULT_SMALL_POOL_SIZE	8192
-#define IOBUF_DEFAULT_LARGE_POOL_SIZE	1024
+#define IOBUF_DEFAULT_LARGE_POOL_SIZE	2047
 #define IOBUF_ALIGNMENT			4096
 #define IOBUF_MIN_SMALL_BUFSIZE		4096
 #define IOBUF_MIN_LARGE_BUFSIZE		8192
