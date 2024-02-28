@@ -32,7 +32,7 @@ upload_deb_urm() {
 
     shopt -s nullglob
 
-    deb_pkgs=(${name}*${VER}-${REV}_{${arch},all}*.deb)
+    deb_pkgs=(${name}*${VER}-${REV}_{${arch},all}*.{d,}deb)
     for deb_pkg in ${deb_pkgs[@]}; do
         test -e $deb_pkg
         echo "INFO: Signing package ${deb_pkg##*/}"
@@ -66,7 +66,7 @@ upload_deb_nexus() {
 
     shopt -s nullglob
 
-    deb_pkgs=(${name}*${VER}-${REV}_{${arch},all}*.deb)
+    deb_pkgs=(${name}*${VER}-${REV}_{${arch},all}*.{d,}deb)
     for deb_pkg in ${deb_pkgs[@]}; do
         test -e $deb_pkg
         echo "INFO: Signing package ${deb_pkg##*/}"
