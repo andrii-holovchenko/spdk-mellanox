@@ -21,6 +21,11 @@ get_releasever() {
   echo $releasever
 }
 
+get_os_name() {
+  . /etc/os-release
+  echo "${ID}_${VERSION_ID}"
+}
+
 upload_deb_urm() {
     # Import gpg key
     gpg --import ${GPG_KEY_PATH}
@@ -31,8 +36,10 @@ upload_deb_urm() {
     for deb_pkg in ${deb_pkgs[@]}; do
         test -e $deb_pkg
         echo "INFO: Signing package ${deb_pkg##*/}"
-        sign_deb=$(dpkg-sig -k ${gpg_key_name} -c ${deb_pkg}|tail -n1)
-        if [ $sign_deb == "NOSIG" ]; then 
+        # Debian 12 doesn't have dpkg-sig, so use debsigs
+	if [[ "$(get_os_name)" == "debian_12" ]]; then
+            debsigs --sign=origin -k ${gpg_key_name} ${deb_pkg}
+        else
             dpkg-sig -k ${gpg_key_name} -s builder ${deb_pkg}
         fi
         MD5=$(md5sum $deb_pkg | awk '{print $1}')
@@ -63,8 +70,10 @@ upload_deb_nexus() {
     for deb_pkg in ${deb_pkgs[@]}; do
         test -e $deb_pkg
         echo "INFO: Signing package ${deb_pkg##*/}"
-        sign_deb=$(dpkg-sig -k ${gpg_key_name} -c ${deb_pkg}|tail -n1)
-        if [ $sign_deb == "NOSIG" ]; then 
+        # Debian 12 doesn't have dpkg-sig, so use debsigs
+	if [[ "$(get_os_name)" == "debian_12" ]]; then
+            debsigs --sign=origin -k ${gpg_key_name} ${deb_pkg}
+        else
             dpkg-sig -k ${gpg_key_name} -s builder ${deb_pkg}
         fi
         upload_url="${REPO_URL}/${repo_name}/"
