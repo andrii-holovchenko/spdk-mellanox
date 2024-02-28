@@ -205,16 +205,18 @@ spdk_nvme_request_get_zcopy_buffers(struct nvme_request *req, uint32_t length)
 int
 spdk_nvme_init_zcopy_resource(void)
 {
+	size_t cache_count;
+
 	pthread_mutex_lock(&g_zcopy_pool_mutex);
 	if (g_spdk_nvme_driver->zcopy_pool_ref_count == 0) {
 		char mempool_name[32];
 
 		snprintf(mempool_name, sizeof(mempool_name), "iov_small_pool_%d", getpid());
+		cache_count = (g_zcopy_pool_opts.zcopy_iov_small_pool_size * 3 / 4) / spdk_env_get_core_count();
 		g_spdk_nvme_driver->zcopy_iov_small_pool = spdk_mempool_create(mempool_name,
 				g_zcopy_pool_opts.zcopy_iov_small_pool_size,
 				g_zcopy_pool_opts.zcopy_small_iov_num * sizeof(struct iovec),
-				SPDK_MEMPOOL_DEFAULT_CACHE_SIZE,
-				SPDK_ENV_SOCKET_ID_ANY);
+				cache_count, SPDK_ENV_SOCKET_ID_ANY);
 		if (!g_spdk_nvme_driver->zcopy_iov_small_pool) {
 			SPDK_ERRLOG("create %s failed: pool_size %u elem_size %lu\n",
 				    mempool_name, g_zcopy_pool_opts.zcopy_iov_small_pool_size,
@@ -224,11 +226,11 @@ spdk_nvme_init_zcopy_resource(void)
 		}
 
 		snprintf(mempool_name, sizeof(mempool_name), "iov_large_pool_%d", getpid());
+		cache_count = (g_zcopy_pool_opts.zcopy_iov_large_pool_size * 3 / 4) / spdk_env_get_core_count();
 		g_spdk_nvme_driver->zcopy_iov_large_pool = spdk_mempool_create(mempool_name,
 				g_zcopy_pool_opts.zcopy_iov_large_pool_size,
 				g_zcopy_pool_opts.zcopy_large_iov_num * sizeof(struct iovec),
-				SPDK_MEMPOOL_DEFAULT_CACHE_SIZE,
-				SPDK_ENV_SOCKET_ID_ANY);
+				cache_count, SPDK_ENV_SOCKET_ID_ANY);
 		if (!g_spdk_nvme_driver->zcopy_iov_large_pool) {
 			SPDK_ERRLOG("create %s failed: pool_size %u elem_size %lu\n",
 				    mempool_name, g_zcopy_pool_opts.zcopy_iov_large_pool_size,
@@ -239,11 +241,11 @@ spdk_nvme_init_zcopy_resource(void)
 		}
 
 		snprintf(mempool_name, sizeof(mempool_name), "zcopy_data_buf_pool");
+		cache_count = (g_zcopy_pool_opts.zcopy_data_buf_pool_size * 3 / 4) / spdk_env_get_core_count();
 		g_spdk_nvme_driver->zcopy_data_buf_pool = spdk_mempool_create(mempool_name,
 				g_zcopy_pool_opts.zcopy_data_buf_pool_size,
 				g_zcopy_pool_opts.zcopy_data_buf_size,
-				SPDK_MEMPOOL_DEFAULT_CACHE_SIZE,
-				SPDK_ENV_SOCKET_ID_ANY);
+				cache_count, SPDK_ENV_SOCKET_ID_ANY);
 		if (!g_spdk_nvme_driver->zcopy_data_buf_pool) {
 			SPDK_ERRLOG("Failed to allocate pool %s\n", mempool_name);
 			spdk_mempool_free(g_spdk_nvme_driver->zcopy_iov_small_pool);
