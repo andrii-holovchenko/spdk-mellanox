@@ -1978,9 +1978,14 @@ xlio_sock_recv_zcopy(struct spdk_xlio_sock *vsock, size_t len, struct spdk_sock_
 	return ret;
 }
 
+#define BUFS_BULK_SIZE 32
+
 static int
 xlio_sock_free_bufs(struct spdk_xlio_sock *sock, struct spdk_sock_buf *sock_buf)
 {
+	void *bufs_bulk[BUFS_BULK_SIZE];
+	uint32_t bufs_count = 0;
+
 	while (sock_buf) {
 		struct xlio_sock_buf *buf = SPDK_CONTAINEROF(sock_buf,
 					    struct xlio_sock_buf,
@@ -1988,13 +1993,20 @@ xlio_sock_free_bufs(struct spdk_xlio_sock *sock, struct spdk_sock_buf *sock_buf)
 		struct xlio_sock_packet *packet = buf->packet;
 		struct spdk_sock_buf *next = buf->sock_buf.next;
 
-		/* TODO: optimize to put im batch */
-		spdk_mempool_put(g_xlio_buffers_pool, buf);
+		bufs_bulk[bufs_count++] = (void *)buf;
+		if (bufs_count == BUFS_BULK_SIZE) {
+			spdk_mempool_put_bulk(g_xlio_buffers_pool, bufs_bulk, bufs_count);
+			bufs_count = 0;
+		}
 		if (--packet->refs == 0) {
 			xlio_sock_free_packet(sock, packet);
 		}
 
 		sock_buf = next;
+	}
+
+	if (bufs_count) {
+		spdk_mempool_put_bulk(g_xlio_buffers_pool, bufs_bulk, bufs_count);
 	}
 
 	return 0;
