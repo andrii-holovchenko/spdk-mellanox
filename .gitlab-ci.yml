@@ -1,33 +1,61 @@
 stages:
     - build
     - test
-    - cleanup
-      # TO BE FIXED: prepare, build, test
-      #
 
-prepare-job:
+# https://stackoverflow.com/questions/62689235/gitlab-ci-how-to-ignore-directory-using-rules-syntax
+build-job:
     stage: build
-    tags: [ mtr, linux, x86_64, f39 ]
+    rules:
+        - changes:
+            - .ci/
+            - packaging/
+            - go/
+            - rpmbuild/
+          when: never
+        - when: on_success
+    tags: [ k8s, mtr, linux, x86_64 ]
+    # image: harbor.mellanox.com/swx-storage/spdk/x86_64/oraclelinux-8-spdk_dev:20240228c
+    image: harbor.mellanox.com/swx-storage/spdk/x86_64/fedora39-spdk_dev:20240228
     variables:
         GIT_SUBMODULE_STRATEGY: recursive
     script:
-        - echo "*** Patch ./CONFIG ***"
-        - patch -p1 < $HOME/spdk-local-config.diff
-        - echo "*** Patch test/nvme/nvme.sh (disable RESET) ***"
-        - patch -p1 < $HOME/spdk-test-nvme.diff
-        # - sudo git config --global --add safe.directory .
-        - git tag v24.01-ci-$CI_JOB_ID
-        # - git submodule update --init
-        - ./configure --with-fio=/work/fio/ --with-rdma=mlx5_dv
-        - make -j6
+        # GET FIO source, run ./configure
+        - (cd .. ; curl -LO https://github.com/axboe/fio/archive/refs/tags/fio-3.35.tar.gz; tar xf fio-3.35.tar.gz)
+        - cd ../fio-fio-3.35
+        - ./configure --prefix=/usr/local
+        - cd $CI_PROJECT_DIR
+        # - ./scripts/check_format.sh
+        - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --disable-unit-tests --target-arch=znver3
+        - make -j4
+        - find test -type f -perm 0755 |egrep -v '\.sh|\.py|\.pl|\/match' |tar cf .test.tar -T /dev/stdin
+    artifacts:
+      paths:
+        - ./build
+        - ./dpdk/build/
+        - .test.tar
+        - ./mk/config.mk
+        - ./mk/cc.mk
 
 test-job:
     stage: test
-    tags: [ mtr, linux, x86_64, f39 ]
-    variables:
-        GIT_CHECKOUT: "false"
-        GIT_CLEAN_FLAGS: "none"
+    rules:
+        - changes:
+            - .ci/
+            - packaging/
+            - go/
+            - rpmbuild/
+          when: never
+        - when: on_success
+    tags: [ vm, mtr, linux, x86_64, f39 ]
+#    variables:
+#        GIT_CHECKOUT: "false"
+#        GIT_CLEAN_FLAGS: "none"
     script:
+        - patch -p1 < $HOME/spdk-test-nvme.diff
+        - tar xf .test.tar
+          # clean up output of autotest from previous runs
+        - sudo rm -rf $CI_PROJECT_DIR/../output/
+          # - sudo ./test/unit/unittest.sh
         - sudo ./autotest.sh $HOME/autorun-spdk.conf
         - sudo chown -R $USER $CI_PROJECT_DIR
-
+########
