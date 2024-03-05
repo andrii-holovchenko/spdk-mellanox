@@ -775,7 +775,7 @@ accel_mlx5_copy_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 
 	rc = accel_mlx5_copy_task_process_one(mlx5_task, qp, (uint64_t)mlx5_task,
-					      SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+					      SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 	if (spdk_unlikely(rc)) {
 		return rc;
 	}
@@ -1062,11 +1062,11 @@ accel_mlx5_crypto_task_process(struct accel_mlx5_task *mlx5_task)
 	if (mlx5_task->flags.bits.inplace) {
 		rc = spdk_mlx5_qp_rdma_read(qp->qp, klms[i].src_klm, klms[i].src_klm_count,
 					    0, mlx5_task->mkeys[i]->mkey,
-					    (uint64_t)mlx5_task, first_rdma_fence | SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+					    (uint64_t)mlx5_task, first_rdma_fence | SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 	} else {
 		rc = spdk_mlx5_qp_rdma_read(qp->qp, klms[i].dst_klm, klms[i].dst_klm_count,
 					    0, mlx5_task->mkeys[i]->mkey,
-					    (uint64_t)mlx5_task, first_rdma_fence | SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+					    (uint64_t)mlx5_task, first_rdma_fence | SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 	}
 
 	if (spdk_unlikely(rc)) {
@@ -1121,7 +1121,7 @@ accel_mlx5_encrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 		      mlx5_task, mlx5_task->num_reqs, mlx5_task->num_submitted_reqs, mlx5_task->num_completed_reqs);
 	rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &klm, mlx5_task->mkeys[0]->mkey,
 					     src_lkey, 0, mlx5_task->blocks_per_req,
-					     (uint64_t)mlx5_task, SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+					     (uint64_t)mlx5_task, SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 	if (spdk_unlikely(rc)) {
 		SPDK_ERRLOG("UMR configure failed with %d\n", rc);
 		return rc;
@@ -1165,7 +1165,7 @@ accel_mlx5_decrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 	 * so it is passed to the function below as src_lkey parameter */
 	rc = accel_mlx5_configure_crypto_umr(mlx5_task, qp, &klm, mlx5_task->mkeys[0]->mkey,
 					     dst_lkey, 0, mlx5_task->blocks_per_req,
-					     (uint64_t)mlx5_task, SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+					     (uint64_t)mlx5_task, SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 	if (spdk_unlikely(rc)) {
 		SPDK_ERRLOG("UMR configure failed with %d\n", rc);
 		return rc;
@@ -1442,7 +1442,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 
 	rc = spdk_mlx5_qp_rdma_read(qp->qp, klm, klm_count, 0, mlx5_task->mkeys[i]->mkey,
-				    (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+				    (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 	if (spdk_unlikely(rc)) {
 		SPDK_ERRLOG("RDMA READ failed with %d\n", rc);
 		return rc;
@@ -1601,7 +1601,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 
 	rc = spdk_mlx5_qp_rdma_read(qp->qp, klm, klm_count, 0, mlx5_task->mkeys[i]->mkey,
-				    (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+				    (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 	if (spdk_unlikely(rc)) {
 		SPDK_ERRLOG("RDMA READ failed with %d\n", rc);
 		return rc;
@@ -1751,11 +1751,11 @@ accel_mlx5_crc_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 		/* Check with copy is not implemeted in this function */
 		assert(mlx5_task->flags.bits.inplace);
 		rc = spdk_mlx5_qp_rdma_write(qp->qp, klm, klm_count, 0, mlx5_task->mkeys[0]->mkey,
-					     (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+					     (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 		dev->stats.rdma_writes++;
 	} else {
 		rc = spdk_mlx5_qp_rdma_read(qp->qp, klm, klm_count, 0, mlx5_task->mkeys[0]->mkey,
-					    (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CQ_UPDATE);
+					    (uint64_t)mlx5_task, rdma_fence | SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE);
 		dev->stats.rdma_reads++;
 	}
 	if (spdk_unlikely(rc)) {
@@ -2012,7 +2012,7 @@ accel_mlx5_crc_task_process_multi_req(struct accel_mlx5_task *mlx5_task)
 		klms[klm_count].addr = (uintptr_t)mlx5_task->psv->crc;
 		klms[klm_count++].byte_count = sizeof(uint32_t);
 	}
-	rdma_fence |= SPDK_MLX5_WQE_CTRL_CQ_UPDATE;
+	rdma_fence |= SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE;
 	if (check_op) {
 		/* Check with copy is not implemeted in this function */
 		assert(mlx5_task->flags.bits.inplace);

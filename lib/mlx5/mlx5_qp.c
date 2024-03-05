@@ -138,6 +138,10 @@ mlx5_qp_init(struct ibv_pd *pd, const struct spdk_mlx5_qp_attr *attr, struct ibv
 	};
 	int rc;
 
+	if (attr->sigall && attr->siglast) {
+		SPDK_ERRLOG("Params sigall and siglast can't be enabled simultaneously\n");
+		return -EINVAL;
+	}
 	rc = spdk_mlx5_query_crypto_caps(pd->context, &crypto_caps);
 	if (rc) {
 		SPDK_ERRLOG("Failed to query dev %s crypto caps\n", pd->context->device->name);
@@ -189,12 +193,11 @@ mlx5_qp_init(struct ibv_pd *pd, const struct spdk_mlx5_qp_attr *attr, struct ibv
 		SPDK_ERRLOG("Failed to alloc completions\n");
 		return rc;
 	}
+	qp->sigmode = SPDK_MLX5_QP_SIG_NONE;
 	if (attr->sigall) {
-		qp->tx_flags |= SPDK_MLX5_WQE_CTRL_CQ_UPDATE;
-	}
-	qp->tx_revert_flags = (uint16_t) -1;
-	if (attr->siglast) {
-		qp->tx_revert_flags &= ~SPDK_MLX5_WQE_CTRL_CQ_UPDATE;
+		qp->sigmode = SPDK_MLX5_QP_SIG_ALL;
+	} else if (attr->siglast) {
+		qp->sigmode = SPDK_MLX5_QP_SIG_LAST;
 	}
 
 	rc = mlx5_qp_connect(qp);

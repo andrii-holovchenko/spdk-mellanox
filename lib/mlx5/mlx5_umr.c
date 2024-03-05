@@ -272,8 +272,7 @@ mlx5_umr_configure_full_crypto(struct spdk_mlx5_qp *dv_qp, struct spdk_mlx5_umr_
 	uint32_t pi;
 	uint32_t i;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -335,8 +334,7 @@ mlx5_umr_configure_full_sig(struct spdk_mlx5_qp *dv_qp, struct spdk_mlx5_umr_att
 	uint32_t pi;
 	uint32_t i;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -400,8 +398,7 @@ mlx5_umr_configure_full_sig_crypto(struct spdk_mlx5_qp *dv_qp, struct spdk_mlx5_
 	uint32_t pi;
 	uint32_t i;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -472,8 +469,7 @@ mlx5_umr_configure_full(struct spdk_mlx5_qp *dv_qp, struct spdk_mlx5_umr_attr *u
 	uint32_t pi;
 	uint32_t i;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -530,8 +526,7 @@ mlx5_umr_configure_with_wrap_around_crypto(struct spdk_mlx5_qp *dv_qp,
 	uint8_t fm_ce_se;
 	uint32_t pi, to_end;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -587,8 +582,7 @@ mlx5_umr_configure_with_wrap_around_sig(struct spdk_mlx5_qp *dv_qp,
 	uint8_t fm_ce_se;
 	uint32_t pi, to_end;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -648,8 +642,7 @@ mlx5_umr_configure_with_wrap_around_sig_crypto(struct spdk_mlx5_qp *dv_qp,
 	uint8_t fm_ce_se;
 	uint32_t pi, to_end;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -715,8 +708,7 @@ mlx5_umr_configure_with_wrap_around(struct spdk_mlx5_qp *dv_qp, struct spdk_mlx5
 	uint8_t fm_ce_se;
 	uint32_t pi, to_end;
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	ctrl = (struct mlx5_wqe_ctrl_seg *)mlx5_qp_get_wqe_bb(hw);
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
@@ -978,8 +970,7 @@ spdk_mlx5_set_psv(struct spdk_mlx5_qp *dv_qp, uint32_t psv_index, uint32_t crc_s
 		return -ENOMEM;
 	}
 
-	fm_ce_se = flags | dv_qp->tx_flags;
-	fm_ce_se &= dv_qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(dv_qp, (uint8_t)flags);
 
 	pi = hw->sq_pi & (hw->sq_wqe_cnt - 1);
 

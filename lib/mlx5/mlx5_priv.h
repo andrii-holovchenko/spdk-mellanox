@@ -85,6 +85,53 @@ struct mlx5_wqe_set_psv_seg {
 	__be64 transient_signature;
 };
 
+/*
+ * Completion and Event mode (SPDK_MLX5_WQE_CTRL_CE_*)
+ * 0x0: cqe_on_cqe_error - Generate CQE only on WQE completion with error. (note - per IB spec, for completion with
+ * error, CQE should be generated)
+ * 0x1: cqe_on_first_cqe_error - Generate CQE only on first WQE completion with error (i.e if CQE on previous WQE
+ * completed in error, no CQE will be generated)
+ * 0x2: cqe_always - Generate CQE on WQE completion (good or bad)
+ * 0x3: cqe_and_eqe - Generate CQE and EQE (local Solicited event)
+ *
+ * g_mlx5_ce_map[][X] is fm_ce_se >> 2 & 0x3 */
+static uint8_t g_mlx5_ce_map[3][4] = {
+	/* SPDK_MLX5_QP_SIG_NONE */
+	[0] = {
+		[0] = 0,
+		[1] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
+		[2] = SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE,
+		[3] = SPDK_MLX5_WQE_CTRL_CE_CQ_ECE
+	},
+	/* SPDK_MLX5_QP_SIG_ALL */
+	[1] = {
+		[0] = SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE,
+		[1] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
+		[2] = SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE,
+		[3] = SPDK_MLX5_WQE_CTRL_CE_CQ_ECE
+	},
+	/* SPDK_MLX5_QP_SIG_LAST */
+	[2] = {
+		[0] = 0,
+		[1] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
+		[2] = 0,
+		[3] = SPDK_MLX5_WQE_CTRL_CE_CQ_ECE
+	}
+
+};
+
+static inline uint8_t
+mlx5_qp_fm_ce_se_update(struct spdk_mlx5_qp *qp, uint8_t fm_ce_se)
+{
+	uint8_t ce = (fm_ce_se >> 2) & 0x3;
+
+	assert((ce & (~0x3)) == 0);
+	fm_ce_se &= ~SPDK_MLX5_WQE_CTRL_CE_MASK;
+	fm_ce_se |= g_mlx5_ce_map[qp->sigmode][ce];
+
+	return fm_ce_se;
+}
+
 static inline void *
 mlx5_qp_get_wqe_bb(struct spdk_mlx5_hw_qp *hw_qp)
 {
@@ -108,7 +155,7 @@ mlx5_qp_set_comp(struct spdk_mlx5_qp *dv_qp, uint16_t pi,
 		 uint64_t wr_id, uint32_t fm_ce_se, uint32_t n_bb)
 {
 	dv_qp->completions[pi].wr_id = wr_id;
-	if ((fm_ce_se & SPDK_MLX5_WQE_CTRL_CQ_UPDATE) != SPDK_MLX5_WQE_CTRL_CQ_UPDATE) {
+	if ((fm_ce_se & SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE) != SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE) {
 		/* non-signaled WQE, accumulate it in outstanding */
 		dv_qp->nonsignaled_outstanding += n_bb;
 		dv_qp->completions[pi].completions = 0;

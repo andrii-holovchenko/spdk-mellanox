@@ -177,6 +177,15 @@ struct mlx5_qp_completion {
 	uint32_t completions;
 };
 
+enum spdk_mlx5_qp_sig_mode {
+	/* Default mode, use flags passed by the user */
+	SPDK_MLX5_QP_SIG_NONE = 0,
+	/* Enable completion for every control WQE segment, regardless of the flags passed by the user */
+	SPDK_MLX5_QP_SIG_ALL = 1,
+	/* Enable completion only for the last control WQE segment, regardless of the flags passed by the user */
+	SPDK_MLX5_QP_SIG_LAST = 2,
+};
+
 struct spdk_mlx5_qp {
 	struct spdk_mlx5_hw_qp hw;
 	struct mlx5_qp_completion *completions;
@@ -187,9 +196,8 @@ struct spdk_mlx5_qp {
 	uint16_t nonsignaled_outstanding;
 	uint16_t max_sge;
 	uint16_t tx_available;
-	uint16_t tx_flags;
-	uint16_t tx_revert_flags;
 	uint16_t last_pi;
+	uint8_t sigmode;
 	bool tx_need_ring_db;
 	bool aes_xts_inc_64;
 };
@@ -344,7 +352,10 @@ spdk_mlx5_qp_prefetch_sq(struct spdk_mlx5_qp *qp, uint32_t wqe_count)
 }
 
 enum {
-	SPDK_MLX5_WQE_CTRL_CQ_UPDATE			= MLX5_WQE_CTRL_CQ_UPDATE,
+	SPDK_MLX5_WQE_CTRL_CE_CQ_ECE			= 3 << 2,
+	SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR		= 1 << 2,
+	SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE			= MLX5_WQE_CTRL_CQ_UPDATE,
+	SPDK_MLX5_WQE_CTRL_CE_MASK			= 3 << 2,
 	SPDK_MLX5_WQE_CTRL_SOLICITED			= MLX5_WQE_CTRL_SOLICITED,
 	SPDK_MLX5_WQE_CTRL_FENCE			= MLX5_WQE_CTRL_FENCE,
 	SPDK_MLX5_WQE_CTRL_INITIATOR_SMALL_FENCE	= MLX5_WQE_CTRL_INITIATOR_SMALL_FENCE,

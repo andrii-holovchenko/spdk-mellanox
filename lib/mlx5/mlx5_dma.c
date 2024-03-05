@@ -162,8 +162,7 @@ mlx5_dma_xfer_full(struct spdk_mlx5_qp *qp, struct mlx5_wqe_data_seg *klm, uint3
 	uint8_t fm_ce_se;
 	uint32_t i, pi;
 
-	fm_ce_se = flags | qp->tx_flags;
-	fm_ce_se &= qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(qp, (uint8_t)flags);
 
 	/* absolute PI value */
 	pi = hw_qp->sq_pi & (hw_qp->sq_wqe_cnt - 1);
@@ -205,8 +204,7 @@ mlx5_dma_xfer_wrap_around(struct spdk_mlx5_qp *qp, struct mlx5_wqe_data_seg *klm
 	uint8_t fm_ce_se;
 	uint32_t i, to_end, pi;
 
-	fm_ce_se = flags | qp->tx_flags;
-	fm_ce_se &= qp->tx_revert_flags;
+	fm_ce_se = mlx5_qp_fm_ce_se_update(qp, (uint8_t)flags);
 
 	/* absolute PI value */
 	pi = hw_qp->sq_pi & (hw_qp->sq_wqe_cnt - 1);
@@ -322,8 +320,9 @@ static inline void
 mlx5_qp_tx_complete(struct spdk_mlx5_qp *qp)
 {
 	qp->tx_need_ring_db = false;
-	qp->ctrl->fm_ce_se |= ~qp->tx_revert_flags;
-	if (qp->tx_revert_flags != (uint16_t) -1) {
+	if (qp->sigmode == SPDK_MLX5_QP_SIG_LAST) {
+		qp->ctrl->fm_ce_se &= ~SPDK_MLX5_WQE_CTRL_CE_MASK;
+		qp->ctrl->fm_ce_se |= SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE;
 		mlx5_qp_update_comp(qp);
 	}
 	mlx5_ring_tx_db(qp, qp->ctrl);
