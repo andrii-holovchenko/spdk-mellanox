@@ -98,7 +98,7 @@ struct mlx5_wqe_set_psv_seg {
 static uint8_t g_mlx5_ce_map[3][4] = {
 	/* SPDK_MLX5_QP_SIG_NONE */
 	[0] = {
-		[0] = 0,
+		[0] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
 		[1] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
 		[2] = SPDK_MLX5_WQE_CTRL_CE_CQ_UPDATE,
 		[3] = SPDK_MLX5_WQE_CTRL_CE_CQ_ECE
@@ -112,9 +112,9 @@ static uint8_t g_mlx5_ce_map[3][4] = {
 	},
 	/* SPDK_MLX5_QP_SIG_LAST */
 	[2] = {
-		[0] = 0,
+		[0] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
 		[1] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
-		[2] = 0,
+		[2] = SPDK_MLX5_WQE_CTRL_CE_CQ_NO_FLUSH_ERROR,
 		[3] = SPDK_MLX5_WQE_CTRL_CE_CQ_ECE
 	}
 
