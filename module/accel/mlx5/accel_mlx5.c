@@ -24,8 +24,8 @@
 #include <infiniband/mlx5dv.h>
 #include <rdma/rdma_cma.h>
 
-#define ACCEL_MLX5_QP_SIZE (256u)
-#define ACCEL_MLX5_CQ_SIZE (256u)
+#define ACCEL_MLX5_QP_SIZE (64u)
+#define ACCEL_MLX5_CQ_SIZE (1024u)
 #define ACCEL_MLX5_NUM_MKEYS (2048u)
 
 #define ACCEL_MLX5_MAX_SGE (16u)
@@ -3903,7 +3903,7 @@ accel_mlx5_get_default_attr(struct accel_mlx5_attr *attr)
 	attr->split_mb_blocks = 0;
 	attr->siglast = false;
 	attr->enable_driver = false;
-	attr->qp_per_domain = false;
+	attr->qp_per_domain = true;
 }
 
 static void

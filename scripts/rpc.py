@@ -3168,8 +3168,10 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('-l', '--siglast', dest='siglast', action='store_true',
                    help="Ignore CQ_UPDATE flags, mark last WQE with CQ_UPDATE before updating the DB")
     p.add_argument('-m', '--merge', dest='merge', action='store_true', help="Merge tasks in the sequence when possible", default=None,)
-    p.add_argument('-f', '--qp-per-domain', dest='qp_per_domain', action='store_true',
-                   help="Use dedicated qpair per memory domain")
+    p.add_argument('-f', '--qp-per-domain', dest='qp_per_domain', action='store_true', default=True,
+                   help="Use dedicated qpair per memory domain per channel")
+    p.add_argument('-n', '--qp-per-channel', dest='qp_per_domain', action='store_false', default=None,
+                   help="Use single QP per channel")
     p.add_argument('-e', '--enable-driver', dest='enable_driver', action='store_true',default=None,
                   help="Enable accel mlx5 platform driver")
     p.set_defaults(func=mlx5_scan_accel_module)
