@@ -262,6 +262,21 @@ struct accel_mlx5_task_ops {
 	void (*complete)(struct accel_mlx5_task *task);
 };
 
+#define ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, task)	\
+do {							\
+	assert((qp)->wrs_submitted < (qp)->max_wrs);	\
+	(qp)->wrs_submitted++;				\
+	(task)->num_wrs++;				\
+} while (0)
+
+#define ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, task)	\
+do {									\
+	(dev)->wrs_in_cq++;						\
+        assert((qp)->wrs_submitted < (qp)->max_wrs);			\
+	(qp)->wrs_submitted++;						\
+	(task)->num_wrs++;						\
+} while (0)
+
 static struct accel_mlx5_task_ops g_accel_mlx5_tasks_ops[];
 static struct spdk_accel_driver g_accel_mlx5_driver;
 
@@ -777,9 +792,7 @@ accel_mlx5_copy_task_process(struct accel_mlx5_task *mlx5_task)
 			return rc;
 		}
 		dev->stats.rdma_writes++;
-		assert(qp->wrs_submitted < qp->max_wrs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 		mlx5_task->num_submitted_reqs++;
 	}
 
@@ -789,9 +802,7 @@ accel_mlx5_copy_task_process(struct accel_mlx5_task *mlx5_task)
 		return rc;
 	}
 	dev->stats.rdma_writes++;
-	assert(qp->wrs_submitted < qp->max_wrs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs++;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 	mlx5_task->num_submitted_reqs++;
 	STAILQ_INSERT_TAIL(&qp->in_hw, mlx5_task, link);
 
@@ -1035,10 +1046,7 @@ accel_mlx5_crypto_task_process(struct accel_mlx5_task *mlx5_task)
 			return rc;
 		}
 		dev->stats.crypto_umrs++;
-		assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-		assert(qp->wrs_submitted < qp->max_wrs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	for (i = 0; i < num_ops - 1; i++) {
@@ -1062,10 +1070,7 @@ accel_mlx5_crypto_task_process(struct accel_mlx5_task *mlx5_task)
 		first_rdma_fence = 0;
 		dev->stats.rdma_reads++;
 		mlx5_task->num_submitted_reqs++;
-		assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-		assert(qp->wrs_submitted < qp->max_wrs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	if (mlx5_task->flags.bits.inplace) {
@@ -1084,10 +1089,7 @@ accel_mlx5_crypto_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 	dev->stats.rdma_reads++;
 	mlx5_task->num_submitted_reqs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	assert(qp->wrs_submitted < qp->max_wrs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs++;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 	STAILQ_INSERT_TAIL(&qp->in_hw, mlx5_task, link);
 
 	if (spdk_unlikely(mlx5_task->num_submitted_reqs == mlx5_task->num_reqs &&
@@ -1121,6 +1123,7 @@ accel_mlx5_encrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 		return -EINVAL;
 	}
 
+	mlx5_task->num_wrs = 0;
 	if (task->s.iovcnt == 1) {
 		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, mlx5_task->qp, &task->s.iovs[0],
 				task->src_domain, task->src_domain_ctx, &src_lkey);
@@ -1137,10 +1140,7 @@ accel_mlx5_encrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 	dev->stats.crypto_umrs++;
 	mlx5_task->num_submitted_reqs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	assert(qp->wrs_submitted < qp->max_wrs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs = 1;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 	STAILQ_INSERT_TAIL(&qp->in_hw, mlx5_task, link);
 
 	SPDK_DEBUGLOG(accel_mlx5, "end, task, %p, reqs: total %u, submitted %u, completed %u\n", mlx5_task,
@@ -1163,6 +1163,7 @@ accel_mlx5_decrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 		return -EINVAL;
 	}
 
+	mlx5_task->num_wrs = 0;
 	if (task->d.iovcnt == 1) {
 		rc = accel_mlx5_task_pretranslate_single_mkey(mlx5_task, mlx5_task->qp, &task->d.iovs[0],
 				task->dst_domain, task->dst_domain_ctx, &dst_lkey);
@@ -1181,10 +1182,7 @@ accel_mlx5_decrypt_mkey_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 	dev->stats.crypto_umrs++;
 	mlx5_task->num_submitted_reqs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	assert(qp->wrs_submitted < qp->max_wrs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs = 1;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 	STAILQ_INSERT_TAIL(&qp->in_hw, mlx5_task, link);
 
 	SPDK_DEBUGLOG(accel_mlx5, "end, task, %p, reqs: total %u, submitted %u, completed %u\n", mlx5_task,
@@ -1384,9 +1382,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 		blocks_processed += mlx5_task->blocks_per_req;
 		iv += mlx5_task->blocks_per_req;
 		dev->stats.sig_crypto_umrs++;
-		assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	if (spdk_unlikely(mlx5_task->psv->bits.error)) {
@@ -1395,8 +1391,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
 		}
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	for (i = 0; i < num_ops - 1; i++) {
@@ -1417,9 +1412,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 		rdma_fence = SPDK_MLX5_WQE_CTRL_STRONG_ORDERING;
 		dev->stats.rdma_reads++;
 		mlx5_task->num_submitted_reqs++;
-		assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	if (mlx5_task->flags.bits.inplace) {
@@ -1458,9 +1451,7 @@ accel_mlx5_encrypt_and_crc_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 	dev->stats.rdma_reads++;
 	mlx5_task->num_submitted_reqs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs++;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 	STAILQ_INSERT_TAIL(&qp->in_hw, mlx5_task, link);
 
 	SPDK_DEBUGLOG(accel_mlx5,
@@ -1563,9 +1554,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 		blocks_processed += mlx5_task->blocks_per_req;
 		iv += mlx5_task->blocks_per_req;
 		dev->stats.sig_crypto_umrs++;
-		assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	if (spdk_unlikely(mlx5_task->psv->bits.error)) {
@@ -1574,8 +1563,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
 		}
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	for (i = 0; i < num_ops - 1; i++) {
@@ -1596,9 +1584,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 		rdma_fence = SPDK_MLX5_WQE_CTRL_STRONG_ORDERING;
 		dev->stats.rdma_reads++;
 		mlx5_task->num_submitted_reqs++;
-		assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	if (mlx5_task->flags.bits.inplace) {
@@ -1617,9 +1603,7 @@ accel_mlx5_crc_and_decrypt_task_process(struct accel_mlx5_task *mlx5_task)
 	}
 	dev->stats.rdma_reads++;
 	mlx5_task->num_submitted_reqs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs++;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 	STAILQ_INSERT_TAIL(&qp->in_hw, mlx5_task, link);
 
 	SPDK_DEBUGLOG(accel_mlx5,
@@ -1709,6 +1693,7 @@ accel_mlx5_crc_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 		return -EINVAL;
 	}
 
+	mlx5_task->num_wrs = 0;
 	/* At this moment we have as many requests as can be submitted to a qp */
 	rc = accel_mlx5_crc_task_fill_sge(mlx5_task, &klms);
 	if (spdk_unlikely(rc)) {
@@ -1722,9 +1707,7 @@ accel_mlx5_crc_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 		return rc;
 	}
 	dev->stats.sig_umrs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs = 1;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 
 	if (mlx5_task->flags.bits.inplace) {
 		klm = klms.src_klm;
@@ -1752,8 +1735,7 @@ accel_mlx5_crc_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
 		}
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	if (check_op) {
@@ -1772,9 +1754,7 @@ accel_mlx5_crc_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 		return rc;
 	}
 	mlx5_task->num_submitted_reqs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs++;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 
 	return 0;
 }
@@ -1937,8 +1917,7 @@ accel_mlx5_crc_task_process_multi_req(struct accel_mlx5_task *mlx5_task)
 		}
 		sig_init = false;
 		dev->stats.sig_umrs++;
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	if (spdk_unlikely(mlx5_task->psv->bits.error)) {
@@ -1947,8 +1926,7 @@ accel_mlx5_crc_task_process_multi_req(struct accel_mlx5_task *mlx5_task)
 			SPDK_ERRLOG("SET_PSV failed with %d\n", rc);
 			return rc;
 		}
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 	}
 
 	for (i = 0; i < num_ops - 1; i++) {
@@ -1980,9 +1958,7 @@ accel_mlx5_crc_task_process_multi_req(struct accel_mlx5_task *mlx5_task)
 			return rc;
 		}
 		mlx5_task->num_submitted_reqs++;
-		assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-		qp->wrs_submitted++;
-		mlx5_task->num_wrs++;
+		ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED(qp, mlx5_task);
 		rdma_fence = SPDK_MLX5_WQE_CTRL_STRONG_ORDERING;
 	}
 	if ((mlx5_task->flags.bits.inplace && mlx5_task->src.iovcnt == 0) ||
@@ -2040,9 +2016,7 @@ accel_mlx5_crc_task_process_multi_req(struct accel_mlx5_task *mlx5_task)
 		return rc;
 	}
 	mlx5_task->num_submitted_reqs++;
-	assert(mlx5_task->num_submitted_reqs <= mlx5_task->num_reqs);
-	qp->wrs_submitted++;
-	mlx5_task->num_wrs++;
+	ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, mlx5_task);
 
 	return 0;
 }
@@ -3349,7 +3323,6 @@ accel_mlx5_submit_tasks(struct spdk_io_channel *_ch, struct spdk_accel_task *tas
 					    ch) == 0;
 	}
 	rc = g_accel_mlx5_tasks_ops[mlx5_task->mlx5_opcode].process(mlx5_task);
-	dev->wrs_in_cq += mlx5_task->num_wrs;
 
 	return rc;
 }
@@ -3515,9 +3488,9 @@ accel_mlx5_process_cpls_siglast(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_
 			assert(task->num_submitted_reqs > task->num_completed_reqs);
 			completed = task->num_submitted_reqs - task->num_completed_reqs;
 			assert(qp->wrs_submitted >= task->num_wrs);
-			assert(dev->wrs_in_cq >= task->num_wrs);
 			qp->wrs_submitted -= task->num_wrs;
-			dev->wrs_in_cq -= task->num_wrs;
+			assert(dev->wrs_in_cq > 0);
+			dev->wrs_in_cq--;
 			task->num_completed_reqs += completed;
 			SPDK_DEBUGLOG(accel_mlx5, "task %p, remaining %u\n", task,
 				      task->num_reqs - task->num_completed_reqs);
@@ -3541,7 +3514,6 @@ accel_mlx5_process_cpls_siglast(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_
 					}
 					break;
 				}
-				dev->wrs_in_cq += task->num_wrs;
 			}
 			if (task == signaled_task) {
 				break;
@@ -3585,9 +3557,9 @@ accel_mlx5_process_cpls(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_completi
 		assert(task->num_submitted_reqs > task->num_completed_reqs);
 		completed = task->num_submitted_reqs - task->num_completed_reqs;
 		assert(qp->wrs_submitted >= task->num_wrs);
-		assert(dev->wrs_in_cq >= task->num_wrs);
 		qp->wrs_submitted -= task->num_wrs;
-		dev->wrs_in_cq -= task->num_wrs;
+		assert(dev->wrs_in_cq > 0);
+		dev->wrs_in_cq--;
 		task->num_completed_reqs += completed;
 		SPDK_DEBUGLOG(accel_mlx5, "task %p, remaining %u\n", task,
 			      task->num_reqs - task->num_completed_reqs);
@@ -3608,7 +3580,6 @@ accel_mlx5_process_cpls(struct accel_mlx5_dev *dev, struct spdk_mlx5_cq_completi
 				}
 				break;
 			}
-			dev->wrs_in_cq += task->num_wrs;
 		}
 	}
 }
@@ -3654,7 +3625,6 @@ accel_mlx5_resubmit_nomem_tasks(struct accel_mlx5_dev *dev)
 			}
 			break;
 		}
-		dev->wrs_in_cq += task->num_wrs;
 		/* If qpair is recovering, task is added back to the nomem list and 0 is returned. In that case we
 		 * need a special condition to iterate the list once and stop this FOREACH loop */
 		if (task == last) {
