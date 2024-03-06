@@ -72,7 +72,6 @@ struct accel_mlx5_stats {
 };
 
 struct accel_mlx5_dev_ctx {
-	struct spdk_mlx5_indirect_mkey **mkeys;
 	struct spdk_mempool *psv_pool;
 	struct spdk_mlx5_psv **psvs;
 	uint32_t *crc_dma_buf;
@@ -228,7 +227,8 @@ struct accel_mlx5_dev {
 	struct spdk_io_channel *ch;
 	/* Pending tasks waiting for requests resources */
 	STAILQ_HEAD(, accel_mlx5_task) nomem;
-	uint32_t wrs_in_cq;
+	uint16_t wrs_in_cq;
+	uint16_t max_wrs_in_cq;
 	bool crypto_multi_block;
 	struct accel_mlx5_stats stats;
 };
@@ -271,6 +271,7 @@ do {							\
 
 #define ACCEL_MLX5_UPDATE_ON_WR_SUBMITTED_SIGNALED(dev, qp, task)	\
 do {									\
+	assert((dev)->wrs_in_cq < (dev)->max_wrs_in_cq);		\
 	(dev)->wrs_in_cq++;						\
         assert((qp)->wrs_submitted < (qp)->max_wrs);			\
 	(qp)->wrs_submitted++;						\
@@ -394,9 +395,16 @@ accel_mlx5_task_check_sigerr(struct accel_mlx5_task *task)
 static inline uint16_t
 accel_mlx5_dev_get_available_slots(struct accel_mlx5_dev *dev, struct accel_mlx5_qp *qp)
 {
-	assert(qp->max_wrs >= qp->wrs_submitted);
+	uint16_t qp_slot;
+	uint16_t cq_slot;
 
-	return qp->max_wrs - qp->wrs_submitted;
+	assert(qp->max_wrs >= qp->wrs_submitted);
+	assert(dev->max_wrs_in_cq >= dev->wrs_in_cq);
+
+	qp_slot = qp->max_wrs - qp->wrs_submitted;
+	cq_slot = dev->max_wrs_in_cq - dev->wrs_in_cq;
+
+	return spdk_min(qp_slot, cq_slot);
 }
 
 static inline void
@@ -3869,6 +3877,7 @@ accel_mlx5_create_cb(void *io_device, void *ctx_buf)
 			goto err_out;
 		}
 
+		dev->max_wrs_in_cq = g_accel_mlx5.cq_size;
 		STAILQ_INIT(&dev->nomem);
 	}
 
