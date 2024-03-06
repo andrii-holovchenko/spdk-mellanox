@@ -376,6 +376,14 @@ accel_mlx5_task_check_sigerr(struct accel_mlx5_task *task)
 	return rc;
 }
 
+static inline uint16_t
+accel_mlx5_dev_get_available_slots(struct accel_mlx5_dev *dev, struct accel_mlx5_qp *qp)
+{
+	assert(qp->max_wrs >= qp->wrs_submitted);
+
+	return qp->max_wrs - qp->wrs_submitted;
+}
+
 static inline void
 accel_mlx5_copy_task_complete(struct accel_mlx5_task *mlx5_task)
 {
@@ -648,10 +656,11 @@ static inline int
 accel_mlx5_task_alloc_mkeys(struct accel_mlx5_task *task, void *mkey_pool)
 {
 	struct accel_mlx5_qp *qp = task->qp;
+	struct  accel_mlx5_dev *dev = qp->dev;
 	/* Each request consists of UMR and RDMA, or 2 operations.
 	 * qp slot is the total number of operations available in qp */
 	uint32_t num_ops = (task->num_reqs - task->num_completed_reqs) * 2;
-	uint32_t qp_slot = qp->max_wrs - qp->wrs_submitted;
+	uint32_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 	uint32_t num_mkeys;
 	int rc;
 
@@ -2084,7 +2093,7 @@ accel_mlx5_task_alloc_crc_ctx(struct accel_mlx5_task *task, void *mkey_pool)
 	}
 	/* One extra slot is needed for SET_PSV WQE to reset the error state in PSV. */
 	if (spdk_unlikely(task->psv->bits.error)) {
-		uint32_t qp_slot = qp->max_wrs - qp->wrs_submitted;
+		uint32_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 		uint32_t n_slots = task->num_ops * 2 + 1;
 
 		if (qp_slot < n_slots) {
@@ -2103,7 +2112,7 @@ accel_mlx5_crypto_task_continue(struct accel_mlx5_task *task)
 {
 	struct accel_mlx5_qp *qp = task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
-	uint32_t qp_slot = qp->max_wrs - qp->wrs_submitted;
+	uint32_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 	uint32_t num_ops = (task->num_reqs - task->num_completed_reqs) * 2;
 	int rc;
 
@@ -2129,6 +2138,7 @@ accel_mlx5_encrypt_mkey_task_continue(struct accel_mlx5_task *task)
 {
 	struct accel_mlx5_qp *qp = task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
+	uint16_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 	int rc;
 
 	if (task->num_ops == 0) {
@@ -2139,7 +2149,7 @@ accel_mlx5_encrypt_mkey_task_continue(struct accel_mlx5_task *task)
 		}
 		task->num_ops = 1;
 	}
-	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
+	if (spdk_unlikely(qp_slot == 0)) {
 		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
@@ -2152,6 +2162,7 @@ accel_mlx5_decrypt_mkey_task_continue(struct accel_mlx5_task *task)
 	struct accel_mlx5_qp *qp = task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
 	int rc;
+	uint16_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 
 	if (task->num_ops == 0) {
 		rc = spdk_mlx5_mkey_pool_get_bulk(dev->crypto_mkeys, task->mkeys, 1);
@@ -2161,7 +2172,7 @@ accel_mlx5_decrypt_mkey_task_continue(struct accel_mlx5_task *task)
 		}
 		task->num_ops = 1;
 	}
-	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
+	if (spdk_unlikely(qp_slot == 0)) {
 		accel_mlx5_dev_nomem_task_qdepth(dev, task);
 		return -ENOMEM;
 	}
@@ -2173,7 +2184,7 @@ accel_mlx5_crc_task_continue(struct accel_mlx5_task *task)
 {
 	struct accel_mlx5_qp *qp = task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
-	uint32_t qp_slot = qp->max_wrs - qp->wrs_submitted;
+	uint32_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 	uint32_t num_ops = (task->num_reqs - task->num_completed_reqs) * 2;
 	int rc;
 
@@ -2198,7 +2209,7 @@ accel_mlx5_crypto_crc_task_continue_init(struct accel_mlx5_task *task)
 {
 	struct accel_mlx5_qp *qp = task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
-	uint32_t qp_slot = qp->max_wrs - qp->wrs_submitted;
+	uint32_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 	uint32_t num_ops = (task->num_reqs - task->num_completed_reqs) * 2;
 	int rc;
 
@@ -2249,7 +2260,7 @@ accel_mlx5_copy_task_continue(struct accel_mlx5_task *task)
 {
 	struct accel_mlx5_qp *qp = task->qp;
 	struct accel_mlx5_dev *dev = qp->dev;
-	uint16_t qp_slot = qp->max_wrs - qp->wrs_submitted;
+	uint16_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 
 	task->num_ops = spdk_min(qp_slot, task->num_reqs - task->num_completed_reqs);
 	if (spdk_unlikely(task->num_ops == 0)) {
@@ -2580,7 +2591,8 @@ static inline int
 accel_mlx5_copy_task_init(struct accel_mlx5_task *mlx5_task)
 {
 	struct spdk_accel_task *task = &mlx5_task->base;
-	uint32_t qp_slot = mlx5_task->qp->max_wrs - mlx5_task->qp->wrs_submitted;
+	struct accel_mlx5_qp *qp = mlx5_task->qp;
+	uint16_t qp_slot = accel_mlx5_dev_get_available_slots(qp->dev, qp);
 
 	if (spdk_unlikely(mlx5_task->flags.bits.driver_seq &&
 			  (mlx5_task->base.src_domain == spdk_accel_get_memory_domain() ||
@@ -2720,6 +2732,7 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_mlx5_crypto_dek_data dek_data;
 	uint32_t num_blocks;
 	int rc;
+	uint16_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 	bool crypto_key_ok;
 
 	if (spdk_unlikely(task->s.iovcnt > ACCEL_MLX5_MAX_SGE)) {
@@ -2775,7 +2788,7 @@ accel_mlx5_encrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	mlx5_task->num_reqs = 1;
 	mlx5_task->blocks_per_req = num_blocks;
 
-	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
+	if (spdk_unlikely(qp_slot == 0)) {
 		mlx5_task->num_ops = 0;
 		accel_mlx5_dev_nomem_task_qdepth(dev, mlx5_task);
 		return -ENOMEM;
@@ -2803,6 +2816,7 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	struct spdk_mlx5_crypto_dek_data dek_data;
 	uint32_t num_blocks;
 	int rc;
+	uint16_t qp_slot = accel_mlx5_dev_get_available_slots(dev, qp);
 	bool crypto_key_ok;
 
 	if (spdk_unlikely(task->d.iovcnt > ACCEL_MLX5_MAX_SGE)) {
@@ -2859,7 +2873,7 @@ accel_mlx5_decrypt_mkey_task_init(struct accel_mlx5_task *mlx5_task)
 	mlx5_task->num_reqs = 1;
 	mlx5_task->blocks_per_req = num_blocks;
 
-	if (spdk_unlikely(qp->max_wrs == qp->wrs_submitted)) {
+	if (spdk_unlikely(qp_slot == 0)) {
 		mlx5_task->num_ops = 0;
 		accel_mlx5_dev_nomem_task_qdepth(dev, mlx5_task);
 		return -ENOMEM;
