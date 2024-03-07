@@ -657,7 +657,10 @@ if __name__ == "__main__":
                    action='store_true')
     p.add_argument('--allow-accel-sequence',
                    help='''Allow NVMe bdevs to advertise support for accel sequences if the
-                   controller also supports them.''', action='store_true')
+                   controller also supports them.''', action='store_true', dest='allow_accel_sequence', default=None)
+    p.add_argument('--disallow-accel-sequence',
+                   help='''Disallow NVMe bdevs to advertise support for accel sequences even if the controller supports them''',
+                   action='store_false', dest='allow_accel_sequence')
     p.add_argument('--rdma-max-cq-size',
                    help='The maximum size of a rdma completion queue. Default: 0 (unlimited)', type=int)
     p.add_argument('--poll-group-requests',
