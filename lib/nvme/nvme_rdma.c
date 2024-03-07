@@ -1870,13 +1870,13 @@ nvme_rdma_req_init(struct nvme_rdma_qpair *rqpair, struct nvme_request *req,
 		rdma_req->has_accel_seq = 1;
 		rdma_req->in_progress_accel_seq = 1;
 		assert(rqpair->num_active_accel_reqs < rqpair->num_entries);
+		rqpair->num_active_accel_reqs++;
 		rc = spdk_rdma_accel_sequence_finish(rqpair->rdma_qp, nvme_rdma_req_get_provider_ctx(rdma_req),
 						     req->payload.opts->accel_sequence, nvme_rdma_accel_seq_cb, rdma_req);
 		if (spdk_unlikely(rc)) {
 			SPDK_ERRLOG("Failed to process accel sequence, rc %d\n", rc);
 			return rc;
 		}
-		rqpair->num_active_accel_reqs++;
 
 		return 0;
 	}
