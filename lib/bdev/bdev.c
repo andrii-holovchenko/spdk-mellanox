@@ -3608,8 +3608,7 @@ bdev_channel_poll_qos(void *arg)
 	}
 
 	if (trigger_needed) {
-		spdk_bdev_for_each_channel(bdev, bdev_channel_submit_qos_io, qos,
-					   bdev_channel_submit_qos_io_done);
+		bdev_trigger_qos_queued_io_resend(bdev);
 	}
 	return SPDK_POLLER_BUSY;
 }
