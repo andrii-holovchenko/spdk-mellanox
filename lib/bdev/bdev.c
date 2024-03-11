@@ -3512,8 +3512,8 @@ spdk_bdev_dump_info_json(struct spdk_bdev *bdev, struct spdk_json_write_ctx *w)
 }
 
 static void
-bdev_channel_submit_qos_io(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
-			   struct spdk_io_channel *io_ch, void *ctx)
+bdev_ch_retry_qos_queued_io(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
+			    struct spdk_io_channel *io_ch, void *ctx)
 {
 	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(io_ch);
 	int status;
@@ -3529,18 +3529,18 @@ bdev_channel_submit_qos_io(struct spdk_bdev_channel_iter *i, struct spdk_bdev *b
 
 
 static void
-bdev_channel_submit_qos_io_done(struct spdk_bdev *bdev, void *ctx, int status)
+bdev_retry_qos_queued_io_done(struct spdk_bdev *bdev, void *ctx, int status)
 {
 
 }
 
 static void
-bdev_trigger_qos_queued_io_resend(struct spdk_bdev *bdev)
+bdev_retry_qos_queued_io(struct spdk_bdev *bdev)
 {
 	struct spdk_bdev_qos *qos = bdev->internal.qos;
 
-	spdk_bdev_for_each_channel(bdev, bdev_channel_submit_qos_io, qos,
-				   bdev_channel_submit_qos_io_done);
+	spdk_bdev_for_each_channel(bdev, bdev_ch_retry_qos_queued_io, qos,
+				   bdev_retry_qos_queued_io_done);
 }
 
 static bool
@@ -3566,7 +3566,7 @@ bdev_group_qos_bdev_poll(struct spdk_bdev_group *group, struct spdk_bdev *bdev, 
 					if (next_bdev == bdev) {
 						continue;
 					}
-					bdev_trigger_qos_queued_io_resend(next_bdev);
+					bdev_retry_qos_queued_io(next_bdev);
 				}
 				spdk_spin_unlock(&group->spinlock);
 			}
@@ -3608,7 +3608,7 @@ bdev_channel_poll_qos(void *arg)
 	}
 
 	if (trigger_needed) {
-		bdev_trigger_qos_queued_io_resend(bdev);
+		bdev_retry_qos_queued_io(bdev);
 	}
 	return SPDK_POLLER_BUSY;
 }
