@@ -2567,7 +2567,7 @@ bdev_qos_queue_io(struct spdk_bdev_qos *qos, struct spdk_bdev_io *bdev_io)
 		group = bdev_io->bdev->internal.group;
 		if (group && (qos->clients & SPDK_BDEV_QOS_CLIENT_GROUP)) {
 			/* check level QoS limits first if applicable */
-			group_limits = bdev_group_get_qos_limits(group);
+			group_limits = group->qos_limits;
 			if (group_limits) {
 				res = bdev_qos_limits_queue_io(group_limits, bdev_io);
 			}
@@ -3534,7 +3534,7 @@ bdev_channel_submit_qos_io_done(struct spdk_bdev *bdev, void *ctx, int status)
 
 }
 
-void
+static void
 bdev_trigger_qos_queued_io_resend(struct spdk_bdev *bdev)
 {
 	struct spdk_bdev_qos *qos = bdev->internal.qos;
@@ -3543,13 +3543,7 @@ bdev_trigger_qos_queued_io_resend(struct spdk_bdev *bdev)
 				   bdev_channel_submit_qos_io_done);
 }
 
-struct bdev_qos_limits *
-bdev_group_get_qos_limits(struct spdk_bdev_group *group)
-{
-	return group->qos_limits;
-}
-
-bool
+static bool
 bdev_group_qos_bdev_poll(struct spdk_bdev_group *group, struct spdk_bdev *bdev, uint64_t now)
 {
 	struct spdk_bdev *next_bdev;
@@ -9039,7 +9033,7 @@ bdev_update_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *limits)
 	bdev_qos_limits_set(&bdev->internal.qos->limits, limits);
 }
 
-void
+static void
 bdev_set_qos_group_rate_limits(struct spdk_bdev *bdev, bool disable,
 			       void (*cb_fn)(void *cb_arg, int status), void *cb_arg)
 {
@@ -10329,6 +10323,7 @@ bdev_group_add_set_qos_rate_limits_cb(void *cb_arg, int status)
 	struct bdev_group_add_set_qos_rate_limits_ctx *ctx = cb_arg;
 	struct spdk_bdev_group *group = ctx->group;
 	struct spdk_bdev_node *node = ctx->node;
+	struct spdk_bdev *bdev = spdk_bdev_desc_get_bdev(node->desc);
 
 	/* if QoS is enabled for the bdev, now add it to the list */
 
@@ -10340,7 +10335,7 @@ bdev_group_add_set_qos_rate_limits_cb(void *cb_arg, int status)
 	/* Clear the in-progress flag, so QoS changes are allowed again */
 	__atomic_clear(&ctx->group->qos_mod_in_progress, __ATOMIC_RELAXED);
 	/* Set the new group pointer */
-	bdev_set_group(spdk_bdev_desc_get_bdev(node->desc), group);
+	bdev->internal.group = group;
 
 	ctx->cb_fn(ctx->cb_arg, status);
 	/* we do not free node here as it's still in the device list */
@@ -10388,7 +10383,7 @@ spdk_bdev_group_add_bdev(struct spdk_bdev_group *group, const char *bdev_name,
 	}
 
 	bdev = spdk_bdev_desc_get_bdev(desc);
-	if (bdev_get_group(bdev)) {
+	if (bdev->internal.group) {
 		SPDK_ERRLOG("bdev %s is already a part of a group\n", bdev_name);
 		spdk_bdev_close(desc);
 		cb_fn(cb_arg, -EINVAL);
@@ -10476,7 +10471,7 @@ bdev_group_remove_set_qos_rate_limits_cb(void *cb_arg, int status)
 	/* Now when QoS is not enabled for the group, proceed with the detach */
 
 	/* Set bdev's group pointer to NULL */
-	bdev_set_group(bdev, NULL);
+	bdev->internal.group = NULL;
 	/* Clear the in-progress flag, so QoS changes are allowed again */
 	__atomic_clear(&group->qos_mod_in_progress, __ATOMIC_RELAXED);
 	/* Make sure that the previous group pointer is not referenced anymore */
