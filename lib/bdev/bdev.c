@@ -367,11 +367,9 @@ struct spdk_bdev_node {
 };
 
 struct spdk_bdev_group {
-	struct bdev_qos_limits *qos_limits;
+	struct spdk_bdev_qos *qos;
 	uint64_t qos_limits_usr_cfg[SPDK_BDEV_QOS_NUM_RATE_LIMIT_TYPES];
 	bool qos_mod_in_progress;
-	uint64_t qos_last_timeslice;
-	uint64_t qos_timeslice_size;
 	bool qos_reset_limits_in_progress;
 	char *name;
 	TAILQ_HEAD(, spdk_bdev_node) bdevs;
@@ -2558,26 +2556,26 @@ bdev_qos_queue_io(struct spdk_bdev_qos *qos, struct spdk_bdev_io *bdev_io)
 {
 	bool res = false;
 	struct spdk_bdev_group *group;
-	struct bdev_qos_limits *group_limits = NULL;
+	struct spdk_bdev_qos *group_qos = NULL;
 
 	if (bdev_qos_io_to_limit(bdev_io) == true) {
 		group = bdev_io->bdev->internal.group;
 		if (group && (qos->clients & SPDK_BDEV_QOS_CLIENT_GROUP)) {
 			/* check level QoS limits first if applicable */
-			group_limits = group->qos_limits;
-			if (group_limits) {
-				res = bdev_qos_limits_queue_io(group_limits, bdev_io);
+			group_qos = group->qos;
+			if (group_qos) {
+				res = bdev_qos_limits_queue_io(&group_qos->limits, bdev_io);
 			}
 		}
 
 		if (!res && (qos->clients & SPDK_BDEV_QOS_CLIENT_BDEV)) {
 			/* check bdev limits if necessary */
 			res = bdev_qos_limits_queue_io(&qos->limits, bdev_io);
-			if (group_limits && res) {
+			if (group_qos && res) {
 				/* if limited by bdev QoS and group QoS limits are enabled ->
 				 * rewind the group level QoS limits
 				 */
-				bdev_qos_limits_rewind(group_limits, bdev_io);
+				bdev_qos_limits_rewind(&group_qos->limits, bdev_io);
 			}
 		}
 	}
@@ -3543,18 +3541,19 @@ bdev_retry_qos_queued_io(struct spdk_bdev *bdev)
 static bool
 bdev_group_qos_bdev_poll(struct spdk_bdev_group *group, struct spdk_bdev *bdev, uint64_t now)
 {
+	struct spdk_bdev_qos *qos = group->qos;
 	struct spdk_bdev *next_bdev;
 	struct spdk_bdev_node *node;
 	bool qos_reset_limits_in_progress;
 	bool res = false;
 
-	if (group->qos_limits) {
+	if (qos) {
 		qos_reset_limits_in_progress = __atomic_test_and_set(&group->qos_reset_limits_in_progress,
 					       __ATOMIC_RELAXED);
 		if (!qos_reset_limits_in_progress) {
-			if (now >= (group->qos_last_timeslice + group->qos_timeslice_size)) {
+			if (now >= (qos->last_timeslice + qos->timeslice_size)) {
 				bdev_qos_limits_reset_quota(
-					group->qos_limits, now, group->qos_timeslice_size, &group->qos_last_timeslice);
+					&qos->limits, now, qos->timeslice_size, &qos->last_timeslice);
 				res = true;
 
 				spdk_spin_lock(&group->spinlock);
@@ -10380,8 +10379,8 @@ spdk_bdev_group_add_bdev(struct spdk_bdev_group *group, const char *bdev_name,
 	ctx->cb_arg = cb_arg;
 	ctx->node->desc = desc;
 
-	/* NOTE: it's safe to check group->qos_limits here, as it's protected by the in-progress atomic */
-	if (!group->qos_limits) {
+	/* NOTE: it's safe to check group->qos here, as it's protected by the in-progress atomic */
+	if (!group->qos) {
 		/* if QoS is not enabled for the group, proceed with adding the bdev */
 		bdev_group_add_set_qos_rate_limits_cb(ctx, 0);
 	} else {
@@ -10488,8 +10487,8 @@ spdk_bdev_group_remove_bdev(struct spdk_bdev_group *group,
 	ctx->cb_fn = cb_fn;
 	ctx->cb_arg = cb_arg;
 
-	/* NOTE: it's safe to check group->qos_limits here, as it's protected by the in-progress atomic */
-	if (!group->qos_limits) {
+	/* NOTE: it's safe to check group->qos here, as it's protected by the in-progress atomic */
+	if (!group->qos) {
 		/* if QoS is not enabled for the group, proceed with the detach */
 		bdev_group_remove_set_qos_rate_limits_cb(ctx, 0);
 	} else {
@@ -10534,7 +10533,7 @@ spdk_bdev_group_get_qos_rate_limits(struct spdk_bdev_group *group, uint64_t *lim
 struct bdev_group_set_qos_rate_limits_ctx {
 	struct spdk_bdev_group *group;
 	uint64_t ref_cnt;
-	struct bdev_qos_limits *old_qos_limits;
+	struct spdk_bdev_qos *old_qos;
 	void (*cb_fn)(void *cb_arg, int status);
 	void *cb_arg;
 	int status;
@@ -10555,7 +10554,10 @@ bdev_group_set_qos_rate_limits_cb(void *cb_arg, int status)
 	if (!ref_cnt) { /* if there'are no mo references, we're done */
 		ctx->cb_fn(ctx->cb_arg, ctx->status);
 		__atomic_clear(&ctx->group->qos_mod_in_progress, __ATOMIC_RELAXED);
-		free(ctx->old_qos_limits); /* old group QoS limits can now be freed */
+		 /* old group QoS limits can now be freed */
+		if (ctx->old_qos) {
+			bdev_qos_destroy(ctx->old_qos);
+		}
 		free(ctx);
 	}
 }
@@ -10567,7 +10569,7 @@ spdk_bdev_group_set_qos_rate_limits(struct spdk_bdev_group *group, const uint64_
 {
 	struct bdev_group_set_qos_rate_limits_ctx *ctx;
 	struct spdk_bdev_node *node;
-	struct bdev_qos_limits *new_qos_limits = NULL;
+	struct spdk_bdev_qos *new_qos = NULL;
 	bool qos_mod_in_progress;
 	bool disable_rate_limit;
 
@@ -10590,19 +10592,18 @@ spdk_bdev_group_set_qos_rate_limits(struct spdk_bdev_group *group, const uint64_
 
 	if (!disable_rate_limit) {
 		/* Allocate and init new group QoS limits */
-		new_qos_limits = (struct bdev_qos_limits *)calloc(1, sizeof(*new_qos_limits));
-		if (new_qos_limits == NULL) {
+		new_qos = bdev_qos_create();
+		if (new_qos == NULL) {
 			SPDK_ERRLOG("Unable to allocate QoS Limits\n");
 			cb_fn(cb_arg, -ENOMEM);
 			return;
 		}
 
-		bdev_qos_limits_init(new_qos_limits);
-		bdev_qos_limits_set(new_qos_limits, limits);
-		bdev_qos_limits_update_max_quota_per_timeslice(new_qos_limits);
+		bdev_qos_limits_set(&new_qos->limits, limits);
+		bdev_qos_limits_update_max_quota_per_timeslice(&new_qos->limits);
 
-		group->qos_last_timeslice = spdk_get_ticks();
-		group->qos_timeslice_size =
+		new_qos->last_timeslice = spdk_get_ticks();
+		new_qos->timeslice_size =
 			SPDK_BDEV_QOS_TIMESLICE_IN_USEC * spdk_get_ticks_hz() / SPDK_SEC_TO_USEC;
 
 	}
@@ -10611,10 +10612,10 @@ spdk_bdev_group_set_qos_rate_limits(struct spdk_bdev_group *group, const uint64_
 	memcpy(group->qos_limits_usr_cfg, limits, sizeof(group->qos_limits_usr_cfg));
 
 	/* Store the old QoS group limits */
-	ctx->old_qos_limits = group->qos_limits;
+	ctx->old_qos = group->qos;
 
 	/* Store the new QoS group limits */
-	group->qos_limits = new_qos_limits;
+	group->qos = new_qos;
 
 	/* Replace the group QoS limits */
 	ctx->ref_cnt = 1; /* reference by the caller */
