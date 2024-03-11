@@ -4098,22 +4098,20 @@ bdev_qos_channel_destroy(void *cb_arg)
 	free(qos);
 }
 
-static int
-bdev_qos_create(struct spdk_bdev *bdev)
+static struct spdk_bdev_qos *
+bdev_qos_create(void)
 {
-	assert(bdev->internal.qos == NULL);
-	assert(spdk_spin_held(&bdev->internal.spinlock));
+	struct spdk_bdev_qos *qos;
 
-
-	bdev->internal.qos = calloc(1, sizeof(*bdev->internal.qos));
-	if (!bdev->internal.qos) {
+	qos = calloc(1, sizeof(*qos));
+	if (!qos) {
 		SPDK_ERRLOG("Unable to allocate memory for QoS tracking\n");
-		return -ENOMEM;
+		return NULL;
 	}
 
-	bdev_qos_limits_init(&bdev->internal.qos->limits);
-	SPDK_DEBUGLOG(bdev, "QoS created for %s\n", bdev->name);
-	return 0;
+	bdev_qos_limits_init(&qos->limits);
+
+	return qos;
 }
 
 static void
@@ -7706,11 +7704,9 @@ bdev_start_qos(struct spdk_bdev *bdev)
 		SPDK_DEBUGLOG(bdev, "Starting QoS for %s\n", bdev->name);
 		/* Create QoS */
 		if (!bdev->internal.qos) {
-			int res;
-
-			res = bdev_qos_create(bdev);
-			if (res) {
-				return res;
+			bdev->internal.qos = bdev_qos_create();
+			if (!bdev->internal.qos) {
+				return -ENOMEM;
 			}
 
 			/* It could only be a bdev level QoS. The group holds a reference to bdev so the device is open and QoS object couldn't be NULL */
@@ -9035,12 +9031,10 @@ bdev_set_qos_group_rate_limits(struct spdk_bdev *bdev, bool disable,
 
 	if (!disable) {
 		if (bdev->internal.qos == NULL) {
-			int res;
-
-			res = bdev_qos_create(bdev);
-			if (res) {
+			bdev->internal.qos = bdev_qos_create();
+			if (bdev->internal.qos == NULL) {
 				spdk_spin_unlock(&bdev->internal.spinlock);
-				bdev_set_qos_limit_done(ctx, res);
+				bdev_set_qos_limit_done(ctx, -ENOMEM);
 				return;
 			}
 		}
@@ -9103,12 +9097,10 @@ bdev_set_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *new_limits,
 
 	if (disable_rate_limit == false) {
 		if (bdev->internal.qos == NULL) {
-			int res;
-
-			res = bdev_qos_create(bdev);
-			if (res) {
+			bdev->internal.qos = bdev_qos_create();
+			if (bdev->internal.qos == NULL) {
 				spdk_spin_unlock(&bdev->internal.spinlock);
-				bdev_set_qos_limit_done(ctx, res);
+				bdev_set_qos_limit_done(ctx, -ENOMEM);
 				return;
 			}
 		}
