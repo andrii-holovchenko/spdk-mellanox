@@ -1151,7 +1151,7 @@ basic_qos(void)
 	CU_ASSERT(bdev_ch[0]->flags == BDEV_CH_QOS_ENABLED);
 
 	/* Confirm that the qos thread is now thread 1 */
-	CU_ASSERT(bdev->internal.qos->ch == bdev_ch[1]);
+	CU_ASSERT(bdev->internal.qos->ch == io_ch[1]);
 
 	/* Tear down the channels */
 	set_thread(0);

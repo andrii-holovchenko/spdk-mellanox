@@ -168,11 +168,8 @@ struct spdk_bdev_qos {
 	/** QoS rate limits. */
 	struct bdev_qos_limits limits;
 
-	/** The channel that all I/O are funneled through. */
-	struct spdk_bdev_channel *ch;
-
-	/** The thread on which the poller is running. */
-	struct spdk_thread *thread;
+	/** The channel on which the qouta is managed. */
+	struct spdk_io_channel *ch;
 
 	/** Size of a timeslice in tsc ticks. */
 	uint64_t timeslice_size;
@@ -3671,9 +3668,7 @@ bdev_enable_qos(struct spdk_bdev *bdev, struct spdk_bdev_channel *ch)
 			/* Take another reference to ch */
 			io_ch = spdk_get_io_channel(__bdev_to_io_dev(bdev));
 			assert(io_ch != NULL);
-			qos->ch = ch;
-
-			qos->thread = spdk_io_channel_get_thread(io_ch);
+			qos->ch = io_ch;
 
 			bdev_qos_limits_update_max_quota_per_timeslice(&qos->limits);
 			qos->timeslice_size =
@@ -4090,7 +4085,7 @@ bdev_qos_channel_destroy(void *cb_arg)
 {
 	struct spdk_bdev_qos *qos = cb_arg;
 
-	spdk_put_io_channel(spdk_io_channel_from_ctx(qos->ch));
+	spdk_put_io_channel(qos->ch);
 	spdk_poller_unregister(&qos->poller);
 
 	SPDK_DEBUGLOG(bdev, "Free QoS %p.\n", qos);
@@ -4117,10 +4112,11 @@ bdev_qos_create(void)
 static void
 bdev_qos_destroy(struct spdk_bdev_qos *qos)
 {
-	if (qos->thread == NULL) {
+	if (qos->ch == NULL) {
 		free(qos);
 	} else {
-		spdk_thread_send_msg(qos->thread, bdev_qos_channel_destroy, qos);
+		spdk_thread_send_msg(spdk_io_channel_get_thread(qos->ch),
+				     bdev_qos_channel_destroy, qos);
 	}
 
 	/* It is safe to continue with destroying the bdev even though the QoS channel hasn't
@@ -7717,7 +7713,7 @@ bdev_start_qos(struct spdk_bdev *bdev)
 		}
 
 		/* Enable QoS */
-		if (bdev->internal.qos->thread == NULL) {
+		if (bdev->internal.qos->ch == NULL) {
 			ctx = calloc(1, sizeof(*ctx));
 			if (ctx == NULL) {
 				SPDK_ERRLOG("Failed to allocate memory for QoS context\n");
@@ -9041,7 +9037,7 @@ bdev_set_qos_group_rate_limits(struct spdk_bdev *bdev, bool disable,
 
 		bdev->internal.qos->clients |= SPDK_BDEV_QOS_CLIENT_GROUP;
 
-		if (bdev->internal.qos->thread == NULL) {
+		if (bdev->internal.qos->ch == NULL) {
 			/* Enabling */
 			spdk_bdev_for_each_channel(bdev, bdev_enable_qos_msg, ctx, bdev_enable_qos_done);
 		} else {
@@ -9109,13 +9105,13 @@ bdev_set_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *new_limits,
 
 		bdev->internal.qos->clients |= SPDK_BDEV_QOS_CLIENT_BDEV;
 
-		if (bdev->internal.qos->thread == NULL) {
+		if (bdev->internal.qos->ch == NULL) {
 			/* Enabling */
 			spdk_bdev_for_each_channel(bdev, bdev_enable_qos_msg, ctx,
 						   bdev_enable_qos_done);
 		} else {
 			/* Updating the limits */
-			spdk_thread_send_msg(bdev->internal.qos->thread,
+			spdk_thread_send_msg(spdk_io_channel_get_thread(bdev->internal.qos->ch),
 					     bdev_update_qos_rate_limit_msg, ctx);
 		}
 	}  else	if (bdev->internal.qos != NULL) {
@@ -9125,7 +9121,7 @@ bdev_set_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *new_limits,
 
 		if (bdev->internal.qos->clients) {
 			/* group QoS client is still enabled -> update the limits */
-			spdk_thread_send_msg(bdev->internal.qos->thread,
+			spdk_thread_send_msg(spdk_io_channel_get_thread(bdev->internal.qos->ch),
 					     bdev_update_qos_rate_limit_msg, ctx);
 		} else {
 			/* No more clients -> disable QoS and delete QoS object */
