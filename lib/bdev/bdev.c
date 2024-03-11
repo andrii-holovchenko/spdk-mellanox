@@ -109,15 +109,11 @@ struct spdk_bdev_mgr {
 
 	TAILQ_HEAD(, spdk_bdev_open_async_ctx) async_bdev_opens;
 
+	struct spdk_bdev_group_list groups;
+
 #ifdef SPDK_CONFIG_VTUNE
 	__itt_domain	*domain;
 #endif
-};
-
-struct spdk_bdev_group_mgr {
-	struct spdk_bdev_group_list groups;
-
-	struct spdk_spinlock spinlock;
 };
 
 static struct spdk_bdev_mgr g_bdev_mgr = {
@@ -127,10 +123,7 @@ static struct spdk_bdev_mgr g_bdev_mgr = {
 	.init_complete = false,
 	.module_init_complete = false,
 	.async_bdev_opens = TAILQ_HEAD_INITIALIZER(g_bdev_mgr.async_bdev_opens),
-};
-
-static struct spdk_bdev_group_mgr g_bdev_group_mgr = {
-	.groups = TAILQ_HEAD_INITIALIZER(g_bdev_group_mgr.groups),
+	.groups = TAILQ_HEAD_INITIALIZER(g_bdev_mgr.groups),
 };
 
 static void
@@ -138,7 +131,6 @@ __attribute__((constructor))
 _bdev_init(void)
 {
 	spdk_spin_init(&g_bdev_mgr.spinlock);
-	spdk_spin_init(&g_bdev_group_mgr.spinlock);
 }
 
 typedef void (*lock_range_cb)(struct lba_range *range, void *ctx, int status);
@@ -10283,9 +10275,9 @@ spdk_bdev_group_create(const char *group_name)
 	TAILQ_INIT(&group->bdevs);
 	spdk_spin_init(&group->spinlock);
 
-	spdk_spin_lock(&g_bdev_group_mgr.spinlock);
-	TAILQ_INSERT_TAIL(&g_bdev_group_mgr.groups, group, link);
-	spdk_spin_unlock(&g_bdev_group_mgr.spinlock);
+	spdk_spin_lock(&g_bdev_mgr.spinlock);
+	TAILQ_INSERT_TAIL(&g_bdev_mgr.groups, group, link);
+	spdk_spin_unlock(&g_bdev_mgr.spinlock);
 
 	return group;
 }
@@ -10295,13 +10287,13 @@ spdk_bdev_group_get_by_name(const char *group_name)
 {
 	struct spdk_bdev_group *group;
 
-	spdk_spin_lock(&g_bdev_group_mgr.spinlock);
-	TAILQ_FOREACH(group, &g_bdev_group_mgr.groups, link) {
+	spdk_spin_lock(&g_bdev_mgr.spinlock);
+	TAILQ_FOREACH(group, &g_bdev_mgr.groups, link) {
 		if (!strcmp(group->name, group_name)) {
 			break;
 		}
 	}
-	spdk_spin_unlock(&g_bdev_group_mgr.spinlock);
+	spdk_spin_unlock(&g_bdev_mgr.spinlock);
 
 	return group;
 }
@@ -10312,14 +10304,14 @@ spdk_for_each_bdev_group(void *cb_arg, int (*cb_fn)(void *cb_arg, struct spdk_bd
 	struct spdk_bdev_group *group = NULL;
 	int rc = 0;
 
-	spdk_spin_lock(&g_bdev_group_mgr.spinlock);
-	TAILQ_FOREACH(group, &g_bdev_group_mgr.groups, link) {
+	spdk_spin_lock(&g_bdev_mgr.spinlock);
+	TAILQ_FOREACH(group, &g_bdev_mgr.groups, link) {
 		rc = cb_fn(cb_arg, group);
 		if (rc) {
 			break;
 		}
 	}
-	spdk_spin_unlock(&g_bdev_group_mgr.spinlock);
+	spdk_spin_unlock(&g_bdev_mgr.spinlock);
 
 	return rc;
 }
@@ -10730,9 +10722,9 @@ spdk_bdev_group_destroy(struct spdk_bdev_group *group,
 	ctx->cb_arg = cb_arg;
 	ctx->group = group;
 
-	spdk_spin_lock(&g_bdev_group_mgr.spinlock);
-	TAILQ_REMOVE(&g_bdev_group_mgr.groups, group, link);
-	spdk_spin_unlock(&g_bdev_group_mgr.spinlock);
+	spdk_spin_lock(&g_bdev_mgr.spinlock);
+	TAILQ_REMOVE(&g_bdev_mgr.groups, group, link);
+	spdk_spin_unlock(&g_bdev_mgr.spinlock);
 
 	bdev_group_destroy_cb(ctx, 0);
 }
@@ -10749,9 +10741,9 @@ spdk_bdev_group_subsystem_config_json(struct spdk_json_write_ctx *w)
 
 	spdk_json_write_array_begin(w);
 
-	spdk_spin_lock(&g_bdev_group_mgr.spinlock);
+	spdk_spin_lock(&g_bdev_mgr.spinlock);
 
-	TAILQ_FOREACH(group, &g_bdev_group_mgr.groups, link) {
+	TAILQ_FOREACH(group, &g_bdev_mgr.groups, link) {
 		spdk_json_write_object_begin(w);
 		spdk_json_write_named_string(w, "method", "bdev_group_create");
 		spdk_json_write_named_object_begin(w, "params");
@@ -10784,7 +10776,7 @@ spdk_bdev_group_subsystem_config_json(struct spdk_json_write_ctx *w)
 			spdk_json_write_object_end(w);
 		}
 	}
-	spdk_spin_unlock(&g_bdev_group_mgr.spinlock);
+	spdk_spin_unlock(&g_bdev_mgr.spinlock);
 
 	spdk_json_write_array_end(w);
 }
