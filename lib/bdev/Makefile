@@ -10,7 +10,7 @@ include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 SO_VER := 14
 SO_MINOR := 0
 
-C_SRCS = bdev.c bdev_rpc.c bdev_zone.c part.c scsi_nvme.c bdev_reservations.c bdev_qos_limits.c bdev_group.c bdev_group_rpc.c
+C_SRCS = bdev.c bdev_rpc.c bdev_zone.c part.c scsi_nvme.c bdev_reservations.c bdev_qos_limits.c bdev_group_rpc.c
 C_SRCS-$(CONFIG_VTUNE) += vtune.c
 LIBNAME = bdev
 

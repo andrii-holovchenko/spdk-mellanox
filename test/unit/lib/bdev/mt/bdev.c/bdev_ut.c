@@ -37,13 +37,6 @@ DEFINE_STUB(spdk_accel_append_copy, int,
 	     void *src_domain_ctx, int flags, spdk_accel_step_cb cb_fn, void *cb_arg), 0);
 DEFINE_STUB(spdk_accel_get_memory_domain, struct spdk_memory_domain *, (void), NULL);
 
-DEFINE_STUB_V(spdk_bdev_group_get_qos_rate_limits, (struct spdk_bdev_group *group,
-		uint64_t *limits));
-DEFINE_STUB(bdev_group_get_qos_limits, struct bdev_qos_limits *, (struct spdk_bdev_group *group),
-	    NULL);
-DEFINE_STUB(bdev_group_qos_bdev_poll, bool, (struct spdk_bdev_group *group, struct spdk_bdev *bdev,
-		uint64_t now), true);
-
 DEFINE_RETURN_MOCK(spdk_memory_domain_pull_data, int);
 int
 spdk_memory_domain_pull_data(struct spdk_memory_domain *src_domain, void *src_domain_ctx,
