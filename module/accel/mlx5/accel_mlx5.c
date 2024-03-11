@@ -2536,6 +2536,7 @@ accel_mlx5_task_assign_qp(struct accel_mlx5_task *mlx5_task, struct accel_mlx5_d
 	 * depends on the opcode */
 	switch (mlx5_task->mlx5_opcode) {
 	case ACCEL_MLX5_OPC_CRYPTO:
+	case ACCEL_MLX5_OPC_ENCRYPT_MKEY:
 	case ACCEL_MLX5_OPC_ENCRYPT_AND_CRC32C:
 		if (mlx5_task->base.src_domain) {
 			return accel_mlx5_dev_get_qp_by_domain(dev, mlx5_task->base.src_domain);
@@ -2544,6 +2545,7 @@ accel_mlx5_task_assign_qp(struct accel_mlx5_task *mlx5_task, struct accel_mlx5_d
 		}
 		break;
 	case ACCEL_MLX5_OPC_CRC32C_AND_DECRYPT:
+	case ACCEL_MLX5_OPC_DECRYPT_MKEY:
 		if (mlx5_task->base.dst_domain) {
 			return accel_mlx5_dev_get_qp_by_domain(dev, mlx5_task->base.dst_domain);
 		} else {
@@ -3305,7 +3307,9 @@ accel_mlx5_submit_tasks(struct spdk_io_channel *_ch, struct spdk_accel_task *tas
 
 	mlx5_task->qp = accel_mlx5_task_assign_qp(mlx5_task, dev);
 	if (spdk_unlikely(!mlx5_task->qp)) {
-		return -EIO;
+		SPDK_ERRLOG("no qp for task %p opc %d; domain src %p, dst %p\n", mlx5_task, mlx5_task->mlx5_opcode,
+			    task->src_domain, task->dst_domain);
+		return -ENODEV;
 	}
 
 	mlx5_task->num_completed_reqs = 0;
