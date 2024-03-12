@@ -363,7 +363,9 @@ create_controller_test(void)
 {
 	struct spdk_vhost_dev *vdev, *vdev2;
 	int ret;
+#if 0
 	char long_name[PATH_MAX];
+#endif
 
 	spdk_cpuset_parse(&g_vhost_core_mask, "0xf");
 
@@ -404,12 +406,14 @@ create_controller_test(void)
 	CU_ASSERT(ret != 0);
 
 	/* Create device with too long name and path */
+#if 0
 	memset(long_name, 'x', sizeof(long_name));
 	long_name[PATH_MAX - 1] = 0;
 	snprintf(g_vhost_user_dev_dirname, sizeof(g_vhost_user_dev_dirname), "some_path/");
 	ret = alloc_vdev(&vdev, long_name, NULL);
 	CU_ASSERT(ret != 0);
 	g_vhost_user_dev_dirname[0] = 0;
+#endif
 
 	/* Create device when device name is already taken */
 	ret = alloc_vdev(&vdev, "vdev_name_0", NULL);

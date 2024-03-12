@@ -107,7 +107,7 @@ DEFINE_STUB(spdk_nvme_ctrlr_get_opts, const struct spdk_nvme_ctrlr_opts *,
 	    (struct spdk_nvme_ctrlr *ctrlr), NULL);
 
 DEFINE_STUB(spdk_nvme_ctrlr_get_max_xfer_size, uint32_t,
-	    (const struct spdk_nvme_ctrlr *ctrlr), 0);
+	    (const struct spdk_nvme_ctrlr *ctrlr), 131072);
 
 DEFINE_STUB(spdk_nvme_ctrlr_get_transport_id, const struct spdk_nvme_transport_id *,
 	    (struct spdk_nvme_ctrlr *ctrlr), NULL);
@@ -145,7 +145,7 @@ DEFINE_STUB(spdk_nvme_cuse_get_ctrlr_name, int, (struct spdk_nvme_ctrlr *ctrlr, 
 
 DEFINE_STUB(spdk_nvme_ns_get_max_io_xfer_size, uint32_t, (struct spdk_nvme_ns *ns), 0);
 
-DEFINE_STUB(spdk_nvme_ns_get_extended_sector_size, uint32_t, (struct spdk_nvme_ns *ns), 0);
+DEFINE_STUB(spdk_nvme_ns_get_extended_sector_size, uint32_t, (struct spdk_nvme_ns *ns), 512);
 
 DEFINE_STUB(spdk_nvme_ns_get_sector_size, uint32_t, (struct spdk_nvme_ns *ns), 0);
 

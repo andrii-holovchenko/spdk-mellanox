@@ -24,8 +24,8 @@ build-job:
         - cd ../fio-fio-3.35
         - ./configure --prefix=/usr/local
         - cd $CI_PROJECT_DIR
-        # - ./scripts/check_format.sh
-        - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --disable-unit-tests --target-arch=znver3
+        - ./scripts/check_format.sh
+        - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --target-arch=znver3
         - make -j4
         - find test -type f -perm 0755 |egrep -v '\.sh|\.py|\.pl|\/match' |tar cf .test.tar -T /dev/stdin
     artifacts:
@@ -55,7 +55,7 @@ test-job:
         - tar xf .test.tar
           # clean up output of autotest from previous runs
         - sudo rm -rf $CI_PROJECT_DIR/../output/
-          # - sudo ./test/unit/unittest.sh
+        - sudo ./test/unit/unittest.sh
         - sudo ./autotest.sh $HOME/autorun-spdk.conf
         - sudo chown -R $USER $CI_PROJECT_DIR
 ########
