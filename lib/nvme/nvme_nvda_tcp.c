@@ -116,7 +116,7 @@ SPDK_STATIC_ASSERT(IOV_BATCH_SIZE <= UINT8_MAX,
 
 struct spdk_xlio_sock_group_impl {
 	TAILQ_HEAD(, spdk_xlio_ring_fd)	ring_fd;
-	TAILQ_HEAD(, spdk_xlio_sock)	pending_recv;
+	TAILQ_HEAD(pending_recv_head, spdk_xlio_sock)	pending_recv;
 	TAILQ_HEAD(, spdk_xlio_sock)	pending_send;
 	struct xlio_packets_pool	*xlio_packets_pool;
 	struct spdk_sock_impl_opts	impl_opts;
@@ -1858,11 +1858,10 @@ xlio_sock_group_impl_poll(struct spdk_xlio_sock_group_impl *group, int max_event
 	}
 
 	num_events = 0;
-	TAILQ_FOREACH_SAFE(vsock, &group->pending_recv, link, ptmp) {
-		if (num_events == max_events) {
-			break;
-		}
-
+	ptmp = TAILQ_LAST(&group->pending_recv, pending_recv_head);
+	vsock = NULL;
+	while (vsock != ptmp && num_events < max_events) {
+		vsock = TAILQ_FIRST(&group->pending_recv);
 		/* If the socket's cb_fn is NULL, just remove it from the
 		 * list and do not add it to socks array */
 		if (spdk_unlikely(vsock->flags.closed)) {
@@ -1871,11 +1870,10 @@ xlio_sock_group_impl_poll(struct spdk_xlio_sock_group_impl *group, int max_event
 			continue;
 		}
 
-		nvme_tcp_qpair_sock_cb(SPDK_CONTAINEROF(vsock, struct nvme_tcp_qpair, sock));
-		num_events++;
-
 		TAILQ_REMOVE(&group->pending_recv, vsock, link);
 		vsock->flags.pending_recv = false;
+		nvme_tcp_qpair_sock_cb(SPDK_CONTAINEROF(vsock, struct nvme_tcp_qpair, sock));
+		num_events++;
 	}
 
 	return num_events;
