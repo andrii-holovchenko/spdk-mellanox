@@ -2703,6 +2703,60 @@ end:
 	pthread_mutex_unlock(&g_devlist_mutex);
 }
 
+struct spdk_io_channel_call {
+	void *io_device;
+	spdk_channel_msg_fn fn;
+	void *ctx;
+};
+
+static void
+_io_channel_send_msg(void *ctx)
+{
+	struct spdk_io_channel_call *c = ctx;
+	struct io_device *dev;
+	struct spdk_io_channel *ch;
+
+	pthread_mutex_lock(&g_devlist_mutex);
+	dev = io_device_get(c->io_device);
+	pthread_mutex_unlock(&g_devlist_mutex);
+
+	if (dev == NULL) {
+		SPDK_ERRLOG("could not find io_device %p\n", c->io_device);
+		free(c);
+		return;
+	}
+
+	ch = thread_get_io_channel(spdk_get_thread(), dev);
+	if (ch != NULL) {
+		c->fn(ch, c->ctx);
+	} else {
+		SPDK_DEBUGLOG(thread, "io_channel was removed before message reached.\n");
+	}
+	free(c);
+}
+
+void
+spdk_io_channel_send_msg(struct spdk_thread *thread, void *io_device,
+			 spdk_channel_msg_fn fn, void *ctx)
+{
+	struct spdk_io_channel_call *c;
+	int rc __attribute__((unused));
+
+	c = calloc(1, sizeof(*c));
+	if (!c) {
+		SPDK_ERRLOG("Unable to allocate caller\n");
+		assert(false);
+		return;
+	}
+
+	c->io_device = io_device;
+	c->fn = fn;
+	c->ctx = ctx;
+
+	rc = spdk_thread_send_msg(thread, _io_channel_send_msg, c);
+	assert(rc == 0);
+}
+
 static void
 thread_interrupt_destroy(struct spdk_thread *thread)
 {

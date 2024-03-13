@@ -54,6 +54,7 @@
 	spdk_io_channel_iter_get_channel;
 	spdk_io_channel_iter_get_ctx;
 	spdk_for_each_channel_continue;
+	spdk_io_channel_send_msg;
 	spdk_interrupt_register;
 	spdk_interrupt_unregister;
 	spdk_interrupt_set_event_types;

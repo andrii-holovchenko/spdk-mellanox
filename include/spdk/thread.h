@@ -47,6 +47,7 @@ struct spdk_thread;
 struct spdk_poller;
 
 struct spdk_io_channel_iter;
+struct spdk_io_channel;
 
 /**
  * A function that is called each time a new thread is created.
@@ -169,6 +170,14 @@ typedef void (*spdk_channel_msg)(struct spdk_io_channel_iter *i);
  * \param status 0 if it completed successfully, or negative errno if it failed.
  */
 typedef void (*spdk_channel_for_each_cpl)(struct spdk_io_channel_iter *i, int status);
+
+/**
+ * Called on the specified channel associated with io_device.
+ *
+ * \param ch I/O channel
+ * \param ctx a pointer to the context bbuffer.
+ */
+typedef void (*spdk_channel_msg_fn)(struct spdk_io_channel *ch, void *ctx);
 
 #define SPDK_IO_CHANNEL_STRUCT_SIZE	96
 
@@ -791,6 +800,20 @@ struct spdk_io_channel *spdk_io_channel_iter_get_channel(struct spdk_io_channel_
  * \return a pointer to the context buffer.
  */
 void *spdk_io_channel_iter_get_ctx(struct spdk_io_channel_iter *i);
+
+/**
+ * Call 'fn' on the channel associated with io_device.
+ *
+ * If channel was deleted before 'fn' had a chance to execute, calling 'fn'
+ * is silently skipped on the thread.
+ *
+ * \param thread The target thread.
+ * \param io_device 'fn' is called on the channel associated with this io_device.
+ * \param fn Called on the channel associated with io_device.
+ * \param ctx Context buffer passed to 'fn'.
+ */
+void spdk_io_channel_send_msg(struct spdk_thread *thread, void *io_device,
+			      spdk_channel_msg_fn fn, void *ctx);
 
 /**
  * Get the io_device for the specified I/O channel.
