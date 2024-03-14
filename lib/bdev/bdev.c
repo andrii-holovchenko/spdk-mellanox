@@ -45,8 +45,6 @@ int __itt_init_ittlib(const char *, __itt_group_id);
 #define BUF_LARGE_CACHE_SIZE			16
 #define NOMEM_THRESHOLD_COUNT			8
 
-#define SPDK_BDEV_QOS_CLIENT_BDEV		0x00000001
-#define SPDK_BDEV_QOS_CLIENT_GROUP		0x00000002
 #define SPDK_BDEV_IO_POLL_INTERVAL_IN_MSEC	1000
 
 /* The maximum number of children requests for a UNMAP or WRITE ZEROES command
@@ -89,6 +87,7 @@ bdev_name_cmp(struct spdk_bdev_name *name1, struct spdk_bdev_name *name2)
 RB_GENERATE_STATIC(bdev_name_tree, spdk_bdev_name, node, bdev_name_cmp);
 
 struct spdk_bdev_group;
+struct spdk_bdev_group_channel;
 
 TAILQ_HEAD(spdk_bdev_group_list, spdk_bdev_group);
 
@@ -179,8 +178,6 @@ struct spdk_bdev_qos {
 
 	/** Poller that processes queued I/O commands each time slice. */
 	struct spdk_poller *poller;
-
-	uint32_t clients;
 };
 
 struct spdk_bdev_mgmt_channel {
@@ -240,6 +237,7 @@ struct spdk_bdev_shared_resource {
 
 #define BDEV_CH_RESET_IN_PROGRESS	(1 << 0)
 #define BDEV_CH_QOS_ENABLED		(1 << 1)
+#define BDEV_CH_QOS_GROUP_ENABLED	(1 << 2)
 
 struct spdk_bdev_channel {
 	struct spdk_bdev	*bdev;
@@ -249,6 +247,9 @@ struct spdk_bdev_channel {
 
 	/* Accel channel */
 	struct spdk_io_channel	*accel_channel;
+
+	/* Bdev group channel */
+	struct spdk_bdev_group_channel *group_ch;
 
 	/* Per io_device per thread data */
 	struct spdk_bdev_shared_resource *shared_resource;
@@ -295,6 +296,8 @@ struct spdk_bdev_channel {
 
 	/** List of I/Os queued by QoS. */
 	bdev_io_tailq_t		qos_queued_io;
+
+	TAILQ_ENTRY(spdk_bdev_channel) tailq;
 };
 
 struct media_event_entry {
@@ -375,6 +378,11 @@ struct spdk_bdev_group {
 	TAILQ_HEAD(, spdk_bdev_node) bdevs;
 	struct spdk_spinlock spinlock;
 	TAILQ_ENTRY(spdk_bdev_group) link;
+};
+
+struct spdk_bdev_group_channel {
+	TAILQ_HEAD(, spdk_bdev_channel)	bdev_ch_list;
+	struct spdk_bdev_group		*group;
 };
 
 #define __bdev_to_io_dev(bdev)		(((char *)bdev) + 1)
@@ -2552,24 +2560,29 @@ bdev_io_do_submit(struct spdk_bdev_channel *bdev_ch, struct spdk_bdev_io *bdev_i
 }
 
 static bool
-bdev_qos_queue_io(struct spdk_bdev_qos *qos, struct spdk_bdev_io *bdev_io)
+bdev_qos_queue_io(struct spdk_bdev_channel *ch, struct spdk_bdev_io *bdev_io)
 {
 	bool res = false;
 	struct spdk_bdev_group *group;
-	struct spdk_bdev_qos *group_qos = NULL;
+	struct spdk_bdev_qos *group_qos = NULL, *qos;
 
 	if (bdev_qos_io_to_limit(bdev_io) == true) {
-		group = bdev_io->bdev->internal.group;
-		if (group && (qos->clients & SPDK_BDEV_QOS_CLIENT_GROUP)) {
+		if (ch->flags & BDEV_CH_QOS_GROUP_ENABLED) {
 			/* check level QoS limits first if applicable */
+			group = ch->bdev->internal.group;
+			assert(group != NULL);
+
 			group_qos = group->qos;
 			if (group_qos) {
 				res = bdev_qos_limits_queue_io(&group_qos->limits, bdev_io);
 			}
 		}
 
-		if (!res && (qos->clients & SPDK_BDEV_QOS_CLIENT_BDEV)) {
+		if (!res && (ch->flags & BDEV_CH_QOS_ENABLED)) {
 			/* check bdev limits if necessary */
+			qos = ch->bdev->internal.qos;
+			assert(qos != NULL);
+
 			res = bdev_qos_limits_queue_io(&qos->limits, bdev_io);
 			if (group_qos && res) {
 				/* if limited by bdev QoS and group QoS limits are enabled ->
@@ -2584,13 +2597,13 @@ bdev_qos_queue_io(struct spdk_bdev_qos *qos, struct spdk_bdev_io *bdev_io)
 }
 
 static int
-bdev_ch_submit_qos_queued_io(struct spdk_bdev_channel *ch, struct spdk_bdev_qos *qos)
+bdev_ch_submit_qos_queued_io(struct spdk_bdev_channel *ch)
 {
 	struct spdk_bdev_io	*bdev_io = NULL, *tmp = NULL;
 	int			submitted_ios = 0;
 
 	TAILQ_FOREACH_SAFE(bdev_io, &ch->qos_queued_io, internal.link, tmp) {
-		if (!bdev_qos_queue_io(qos, bdev_io)) {
+		if (!bdev_qos_queue_io(ch, bdev_io)) {
 			TAILQ_REMOVE(&ch->qos_queued_io, bdev_io, internal.link);
 			bdev_io_do_submit(ch, bdev_io);
 
@@ -3236,7 +3249,6 @@ static inline void
 _bdev_io_submit(void *ctx)
 {
 	struct spdk_bdev_io *bdev_io = ctx;
-	struct spdk_bdev *bdev = bdev_io->bdev;
 	struct spdk_bdev_channel *bdev_ch = bdev_io->internal.ch;
 
 	if (spdk_likely(bdev_ch->flags == 0)) {
@@ -3246,13 +3258,13 @@ _bdev_io_submit(void *ctx)
 
 	if (bdev_ch->flags & BDEV_CH_RESET_IN_PROGRESS) {
 		_bdev_io_complete_in_submit(bdev_ch, bdev_io, SPDK_BDEV_IO_STATUS_ABORTED);
-	} else if (bdev_ch->flags & BDEV_CH_QOS_ENABLED) {
+	} else if (bdev_ch->flags & (BDEV_CH_QOS_ENABLED | BDEV_CH_QOS_GROUP_ENABLED)) {
 		if (spdk_unlikely(bdev_io->type == SPDK_BDEV_IO_TYPE_ABORT) &&
 		    bdev_abort_queued_io(&bdev_ch->qos_queued_io, bdev_io->u.abort.bio_to_abort)) {
 			_bdev_io_complete_in_submit(bdev_ch, bdev_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		} else {
 			TAILQ_INSERT_TAIL(&bdev_ch->qos_queued_io, bdev_io, internal.link);
-			bdev_ch_submit_qos_queued_io(bdev_ch, bdev->internal.qos);
+			bdev_ch_submit_qos_queued_io(bdev_ch);
 		}
 	} else {
 		SPDK_ERRLOG("unknown bdev_ch flag %x found\n", bdev_ch->flags);
@@ -3513,7 +3525,7 @@ bdev_ch_retry_qos_queued_io(struct spdk_bdev_channel_iter *i, struct spdk_bdev *
 	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(io_ch);
 	int status;
 
-	bdev_ch_submit_qos_queued_io(bdev_ch, bdev->internal.qos);
+	bdev_ch_submit_qos_queued_io(bdev_ch);
 
 	/* if all IOs were sent then continue the iteration, otherwise - stop it */
 	/* TODO: channels round robing */
@@ -3538,49 +3550,38 @@ bdev_retry_qos_queued_io(struct spdk_bdev *bdev)
 				   bdev_retry_qos_queued_io_done);
 }
 
-static bool
-bdev_group_qos_bdev_poll(struct spdk_bdev_group *group, struct spdk_bdev *bdev, uint64_t now)
+static void
+bdev_group_ch_retry_qos_queued_io(struct spdk_io_channel_iter *i)
 {
-	struct spdk_bdev_qos *qos = group->qos;
-	struct spdk_bdev *next_bdev;
-	struct spdk_bdev_node *node;
-	bool qos_reset_limits_in_progress;
-	bool res = false;
+	struct spdk_io_channel *_ch = spdk_io_channel_iter_get_channel(i);
+	struct spdk_bdev_group_channel *group_ch = spdk_io_channel_get_ctx(_ch);
+	struct spdk_bdev_channel *bdev_ch;
 
-	if (qos) {
-		qos_reset_limits_in_progress = __atomic_test_and_set(&group->qos_reset_limits_in_progress,
-					       __ATOMIC_RELAXED);
-		if (!qos_reset_limits_in_progress) {
-			if (now >= (qos->last_timeslice + qos->timeslice_size)) {
-				bdev_qos_limits_reset_quota(
-					&qos->limits, now, qos->timeslice_size, &qos->last_timeslice);
-				res = true;
-
-				spdk_spin_lock(&group->spinlock);
-				TAILQ_FOREACH(node, &group->bdevs, link) {
-					next_bdev = spdk_bdev_desc_get_bdev(node->desc);
-					if (next_bdev == bdev) {
-						continue;
-					}
-					bdev_retry_qos_queued_io(next_bdev);
-				}
-				spdk_spin_unlock(&group->spinlock);
-			}
-
-			__atomic_clear(&group->qos_reset_limits_in_progress, __ATOMIC_RELAXED);
-		}
+	TAILQ_FOREACH(bdev_ch, &group_ch->bdev_ch_list, tailq) {
+		bdev_ch_submit_qos_queued_io(bdev_ch);
 	}
 
-	return res;
+	spdk_for_each_channel_continue(i, 0);
+}
+
+static void
+bdev_group_retry_qos_queued_io_done(struct spdk_io_channel_iter *i, int status)
+{
+}
+
+static void
+bdev_group_retry_qos_queued_io(struct spdk_bdev_group *group)
+{
+	spdk_for_each_channel(group, bdev_group_ch_retry_qos_queued_io, NULL,
+			      bdev_group_retry_qos_queued_io_done);
 }
 
 static int
-bdev_channel_poll_qos(void *arg)
+bdev_group_poll_qos(void *arg)
 {
-	struct spdk_bdev *bdev = arg;
-	struct spdk_bdev_qos *qos = bdev->internal.qos;
+	struct spdk_bdev_group *group = arg;
+	struct spdk_bdev_qos *qos = group->qos;
 	uint64_t now = spdk_get_ticks();
-	bool trigger_needed = false;
 
 	if (now < (qos->last_timeslice + qos->timeslice_size)) {
 		/* We received our callback earlier than expected - return
@@ -3591,22 +3592,99 @@ bdev_channel_poll_qos(void *arg)
 		return SPDK_POLLER_IDLE;
 	}
 
-	if (bdev->internal.group) {
-		/* If bdev is added to a group, call the group poller */
-		trigger_needed = bdev_group_qos_bdev_poll(bdev->internal.group, bdev, now);
-	}
+	/* Reset for next round of rate limiting */
+	bdev_qos_limits_reset_quota(
+		&qos->limits, now, qos->timeslice_size, &qos->last_timeslice);
 
-	if (bdev->internal.qos->clients & SPDK_BDEV_QOS_CLIENT_BDEV) {
-		/* If QoS is enabled for the bdev, reset for next round of rate limiting */
-		bdev_qos_limits_reset_quota(
-			&qos->limits, now, qos->timeslice_size, &qos->last_timeslice);
-		trigger_needed = true;
-	}
+	bdev_group_retry_qos_queued_io(group);
 
-	if (trigger_needed) {
-		bdev_retry_qos_queued_io(bdev);
-	}
 	return SPDK_POLLER_BUSY;
+}
+
+static int
+bdev_channel_poll_qos(void *arg)
+{
+	struct spdk_bdev *bdev = arg;
+	struct spdk_bdev_qos *qos = bdev->internal.qos;
+	uint64_t now = spdk_get_ticks();
+
+	if (now < (qos->last_timeslice + qos->timeslice_size)) {
+		/* We received our callback earlier than expected - return
+		 *  immediately and wait to do accounting until at least one
+		 *  timeslice has actually expired.  This should never happen
+		 *  with a well-behaved timer implementation.
+		 */
+		return SPDK_POLLER_IDLE;
+	}
+
+	/* Reset for next round of rate limiting */
+	bdev_qos_limits_reset_quota(
+		&qos->limits, now, qos->timeslice_size, &qos->last_timeslice);
+
+	bdev_retry_qos_queued_io(bdev);
+
+	return SPDK_POLLER_BUSY;
+}
+
+static void
+bdev_ch_enable_qos_group(struct spdk_bdev_channel *bdev_ch,
+			 struct spdk_bdev_group *group)
+{
+	if (group->qos != NULL) {
+		bdev_ch->flags |= BDEV_CH_QOS_GROUP_ENABLED;
+	}
+}
+
+static void bdev_ch_unthrottle_qos_queued_io(struct spdk_bdev_channel *bdev_ch);
+
+static void
+bdev_ch_disable_qos_group(struct spdk_bdev_channel *bdev_ch)
+{
+	if (!(bdev_ch->flags & BDEV_CH_QOS_GROUP_ENABLED)) {
+		return;
+	}
+
+	bdev_ch->flags &= ~BDEV_CH_QOS_GROUP_ENABLED;
+
+	bdev_ch_unthrottle_qos_queued_io(bdev_ch);
+}
+
+static void
+bdev_ch_create_group_channel(struct spdk_bdev_channel *bdev_ch,
+			     struct spdk_bdev_group *group)
+{
+	struct spdk_io_channel *group_io_ch;
+
+	assert(group != NULL);
+
+	if (bdev_ch->group_ch != NULL) {
+		return;
+	}
+
+	group_io_ch = spdk_get_io_channel(group);
+	if (group_io_ch == NULL) {
+		return;
+	}
+
+	bdev_ch->group_ch = spdk_io_channel_get_ctx(group_io_ch);
+	TAILQ_INSERT_TAIL(&bdev_ch->group_ch->bdev_ch_list, bdev_ch, tailq);
+
+	bdev_ch_enable_qos_group(bdev_ch, group);
+}
+
+static void
+bdev_ch_destroy_group_channel(struct spdk_bdev_channel *bdev_ch)
+{
+	if (bdev_ch->group_ch == NULL) {
+		return;
+	}
+
+	TAILQ_REMOVE(&bdev_ch->group_ch->bdev_ch_list, bdev_ch, tailq);
+
+	spdk_put_io_channel(spdk_io_channel_from_ctx(bdev_ch->group_ch));
+	bdev_ch->group_ch = NULL;
+
+	bdev_ch_disable_qos_group(bdev_ch);
 }
 
 static void
@@ -3628,6 +3706,8 @@ bdev_channel_destroy_resource(struct spdk_bdev_channel *ch)
 
 	spdk_put_io_channel(ch->channel);
 	spdk_put_io_channel(ch->accel_channel);
+
+	bdev_ch_destroy_group_channel(ch);
 
 	shared_resource = ch->shared_resource;
 
@@ -3943,6 +4023,9 @@ bdev_channel_create(void *io_device, void *ctx_buf)
 
 	spdk_spin_lock(&bdev->internal.spinlock);
 	bdev_enable_qos(bdev, ch);
+	if (bdev->internal.group) {
+		bdev_ch_create_group_channel(ch, bdev->internal.group);
+	}
 
 	TAILQ_FOREACH(range, &bdev->internal.locked_ranges, tailq) {
 		struct lba_range *new_range;
@@ -7704,9 +7787,6 @@ bdev_start_qos(struct spdk_bdev *bdev)
 				return -ENOMEM;
 			}
 
-			/* It could only be a bdev level QoS. The group holds a reference to bdev so the device is open and QoS object couldn't be NULL */
-			bdev->internal.qos->clients |= SPDK_BDEV_QOS_CLIENT_BDEV;
-
 			/* Setup QoS using the previously configured limits */
 			bdev_qos_limits_set(&bdev->internal.qos->limits, bdev->internal.qos_limits);
 		}
@@ -8971,22 +9051,6 @@ bdev_enable_qos_done(struct spdk_bdev *bdev, void *_ctx, int status)
 }
 
 static void
-bdev_update_qos_msg(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
-		    struct spdk_io_channel *ch, void *_ctx)
-{
-	/* Do nothing, we need it to make sure all the threads dereferenced the old QoS values */
-	spdk_bdev_for_each_channel_continue(i, 0);
-}
-
-static void
-bdev_update_qos_done(struct spdk_bdev *bdev, void *_ctx, int status)
-{
-	struct set_qos_limit_ctx *ctx = _ctx;
-
-	bdev_set_qos_limit_done(ctx, status);
-}
-
-static void
 bdev_update_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *limits)
 {
 	assert(bdev->internal.qos != NULL);
@@ -8994,68 +9058,6 @@ bdev_update_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *limits)
 	memcpy(&bdev->internal.qos_limits, limits, sizeof(bdev->internal.qos_limits));
 
 	bdev_qos_limits_set(&bdev->internal.qos->limits, limits);
-}
-
-static void
-bdev_set_qos_group_rate_limits(struct spdk_bdev *bdev, bool disable,
-			       void (*cb_fn)(void *cb_arg, int status), void *cb_arg)
-{
-	struct set_qos_limit_ctx *ctx;
-
-	SPDK_DEBUGLOG(bdev, "Updating group QoS limits for %s (disable=%d)\n",
-		      bdev->name, disable);
-	ctx = calloc(1, sizeof(*ctx));
-	if (ctx == NULL) {
-		cb_fn(cb_arg, -ENOMEM);
-		return;
-	}
-
-	ctx->cb_fn = cb_fn;
-	ctx->cb_arg = cb_arg;
-	ctx->bdev = bdev;
-
-	spdk_spin_lock(&bdev->internal.spinlock);
-	if (bdev->internal.qos_mod_in_progress) {
-		spdk_spin_unlock(&bdev->internal.spinlock);
-		free(ctx);
-		cb_fn(cb_arg, -EAGAIN);
-		return;
-	}
-
-	bdev->internal.qos_mod_in_progress = true;
-
-	if (!disable) {
-		if (bdev->internal.qos == NULL) {
-			bdev->internal.qos = bdev_qos_create();
-			if (bdev->internal.qos == NULL) {
-				spdk_spin_unlock(&bdev->internal.spinlock);
-				bdev_set_qos_limit_done(ctx, -ENOMEM);
-				return;
-			}
-		}
-
-		bdev->internal.qos->clients |= SPDK_BDEV_QOS_CLIENT_GROUP;
-
-		if (bdev->internal.qos->ch == NULL) {
-			/* Enabling */
-			spdk_bdev_for_each_channel(bdev, bdev_enable_qos_msg, ctx, bdev_enable_qos_done);
-		} else {
-			/* For group update make sure all the threads dereferenced the QoS object */
-			spdk_bdev_for_each_channel(bdev, bdev_update_qos_msg, ctx, bdev_update_qos_done);
-		}
-	} else if (bdev->internal.qos) {
-		bdev->internal.qos->clients &= ~SPDK_BDEV_QOS_CLIENT_GROUP;
-		if (bdev->internal.qos->clients) {
-			/* bdev QoS is still enabled, so there's nothing to do */
-			bdev_set_qos_limit_done(ctx, 0);
-		} else {
-			/* No more clients -> disable QoS and delete QoS object */
-			spdk_bdev_for_each_channel(bdev, bdev_disable_qos_msg, ctx,
-						   bdev_disable_qos_msg_done);
-		}
-	}
-
-	spdk_spin_unlock(&bdev->internal.spinlock);
 }
 
 static void
@@ -9102,8 +9104,6 @@ bdev_set_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *new_limits,
 
 		bdev_update_qos_rate_limits(bdev, new_limits);
 
-		bdev->internal.qos->clients |= SPDK_BDEV_QOS_CLIENT_BDEV;
-
 		if (bdev->internal.qos->ch == NULL) {
 			/* Enabling */
 			spdk_bdev_for_each_channel(bdev, bdev_enable_qos_msg, ctx,
@@ -9114,19 +9114,8 @@ bdev_set_qos_rate_limits(struct spdk_bdev *bdev, uint64_t *new_limits,
 					     bdev_update_qos_rate_limit_msg, ctx);
 		}
 	}  else	if (bdev->internal.qos != NULL) {
-		bdev->internal.qos->clients &= ~SPDK_BDEV_QOS_CLIENT_BDEV;
-
-		bdev_update_qos_rate_limits(bdev, new_limits);
-
-		if (bdev->internal.qos->clients) {
-			/* group QoS client is still enabled -> update the limits */
-			spdk_thread_send_msg(spdk_io_channel_get_thread(bdev->internal.qos->ch),
-					     bdev_update_qos_rate_limit_msg, ctx);
-		} else {
-			/* No more clients -> disable QoS and delete QoS object */
-			spdk_bdev_for_each_channel(bdev, bdev_disable_qos_msg, ctx,
-						   bdev_disable_qos_msg_done);
-		}
+		spdk_bdev_for_each_channel(bdev, bdev_disable_qos_msg, ctx,
+					   bdev_disable_qos_msg_done);
 	} else {
 		spdk_spin_unlock(&bdev->internal.spinlock);
 		bdev_set_qos_limit_done(ctx, 0);
@@ -10207,6 +10196,68 @@ spdk_bdev_wait_for_ready(struct spdk_bdev_desc *desc, int64_t timeout_in_msec,
 	return bdev->fn_table->wait_for_ready(bdev->ctxt, timeout_in_msec, cb_fn, cb_arg);
 }
 
+static void
+bdev_group_enable_qos(struct spdk_bdev_group *group)
+{
+	struct spdk_bdev_qos *qos = group->qos;
+
+	if (qos == NULL) {
+		return;
+	}
+
+	if (qos->ch != NULL) {
+		return;
+	}
+
+	qos->ch = spdk_get_io_channel(group);
+	assert(qos->ch != NULL);
+
+	qos->timeslice_size =
+		SPDK_BDEV_QOS_TIMESLICE_IN_USEC * spdk_get_ticks_hz() / SPDK_SEC_TO_USEC;
+	qos->last_timeslice = spdk_get_ticks();
+	qos->poller = SPDK_POLLER_REGISTER(bdev_group_poll_qos,
+					   group,
+					   SPDK_BDEV_QOS_TIMESLICE_IN_USEC);
+}
+
+static void
+bdev_group_disable_qos(struct spdk_bdev_group *group)
+{
+	struct spdk_bdev_qos *qos;
+
+	spdk_spin_lock(&group->spinlock);
+	qos = group->qos;
+	group->qos = NULL;
+	spdk_spin_unlock(&group->spinlock);
+
+	if (qos != NULL) {
+		bdev_qos_destroy(qos);
+	}
+}
+
+static int
+bdev_group_channel_create(void *io_device, void *ctx_buf)
+{
+	struct spdk_bdev_group *group = io_device;
+	struct spdk_bdev_group_channel *ch = ctx_buf;
+
+	TAILQ_INIT(&ch->bdev_ch_list);
+	ch->group = group;
+
+	spdk_spin_lock(&group->spinlock);
+
+	bdev_group_enable_qos(group);
+
+	spdk_spin_unlock(&group->spinlock);
+
+	return 0;
+}
+
+static void
+bdev_group_channel_destroy(void *io_device, void *ctx_buf)
+{
+}
+
 struct spdk_bdev_group *
 spdk_bdev_group_create(const char *group_name)
 {
@@ -10227,6 +10278,11 @@ spdk_bdev_group_create(const char *group_name)
 
 	TAILQ_INIT(&group->bdevs);
 	spdk_spin_init(&group->spinlock);
+
+	spdk_io_device_register(group, bdev_group_channel_create,
+				bdev_group_channel_destroy,
+				sizeof(struct spdk_bdev_group_channel),
+				group->name);
 
 	spdk_spin_lock(&g_bdev_mgr.spinlock);
 	TAILQ_INSERT_TAIL(&g_bdev_mgr.groups, group, link);
@@ -10277,12 +10333,11 @@ struct bdev_group_add_set_qos_rate_limits_ctx {
 };
 
 static void
-bdev_group_add_set_qos_rate_limits_cb(void *cb_arg, int status)
+bdev_group_add_bdev_msg_done(struct spdk_bdev *bdev, void *_ctx, int status)
 {
-	struct bdev_group_add_set_qos_rate_limits_ctx *ctx = cb_arg;
+	struct bdev_group_add_set_qos_rate_limits_ctx *ctx = _ctx;
 	struct spdk_bdev_group *group = ctx->group;
 	struct spdk_bdev_node *node = ctx->node;
-	struct spdk_bdev *bdev = spdk_bdev_desc_get_bdev(node->desc);
 
 	/* if QoS is enabled for the bdev, now add it to the list */
 
@@ -10299,6 +10354,19 @@ bdev_group_add_set_qos_rate_limits_cb(void *cb_arg, int status)
 	ctx->cb_fn(ctx->cb_arg, status);
 	/* we do not free node here as it's still in the device list */
 	free(ctx);
+}
+
+static void
+bdev_group_add_bdev_msg(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
+			struct spdk_io_channel *io_ch, void *_ctx)
+{
+	struct spdk_bdev_channel *bdev_ch = spdk_io_channel_get_ctx(io_ch);
+	struct bdev_group_add_set_qos_rate_limits_ctx *ctx = _ctx;
+	struct spdk_bdev_group *group = ctx->group;
+
+	bdev_ch_create_group_channel(bdev_ch, group);
+
+	spdk_bdev_for_each_channel_continue(i, 0);
 }
 
 static void
@@ -10379,14 +10447,8 @@ spdk_bdev_group_add_bdev(struct spdk_bdev_group *group, const char *bdev_name,
 	ctx->cb_arg = cb_arg;
 	ctx->node->desc = desc;
 
-	/* NOTE: it's safe to check group->qos here, as it's protected by the in-progress atomic */
-	if (!group->qos) {
-		/* if QoS is not enabled for the group, proceed with adding the bdev */
-		bdev_group_add_set_qos_rate_limits_cb(ctx, 0);
-	} else {
-		/* if QoS is enabled for the group, enable it for the bdev first */
-		bdev_set_qos_group_rate_limits(bdev, false, bdev_group_add_set_qos_rate_limits_cb, ctx);
-	}
+	spdk_bdev_for_each_channel(bdev, bdev_group_add_bdev_msg, ctx,
+				   bdev_group_add_bdev_msg_done);
 }
 
 struct bdev_group_remove_cb_ctx {
@@ -10397,21 +10459,16 @@ struct bdev_group_remove_cb_ctx {
 };
 
 static void
-bdev_group_remove_msg(struct spdk_bdev_channel_iter *i,
-		      struct spdk_bdev *bdev,
-		      struct spdk_io_channel *ch,
-		      void *_ctx)
-{
-	/* We have nothing to do here, we just make sure that this device doesn't
-	 * refer to the group anymore */
-	spdk_bdev_for_each_channel_continue(i, 0);
-}
-
-static void
-bdev_group_remove_done(struct spdk_bdev *bdev, void *_ctx, int status)
+bdev_group_remove_bdev_msg_done(struct spdk_bdev *bdev, void *_ctx, int status)
 {
 	struct bdev_group_remove_cb_ctx *ctx = _ctx;
+	struct spdk_bdev_group *group = ctx->group;
 	struct spdk_bdev_node *node = ctx->node;
+
+	/* Set bdev's group pointer to NULL */
+	bdev->internal.group = NULL;
+	/* Clear the in-progress flag, so QoS changes are allowed again */
+	__atomic_clear(&group->qos_mod_in_progress, __ATOMIC_RELAXED);
 
 	spdk_bdev_close(node->desc);
 	ctx->cb_fn(ctx->cb_arg, 0);
@@ -10420,22 +10477,14 @@ bdev_group_remove_done(struct spdk_bdev *bdev, void *_ctx, int status)
 }
 
 static void
-bdev_group_remove_set_qos_rate_limits_cb(void *cb_arg, int status)
+bdev_group_remove_bdev_msg(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
+			   struct spdk_io_channel *io_ch, void *ctx)
 {
-	struct bdev_group_remove_cb_ctx *ctx = cb_arg;
-	struct spdk_bdev_group *group = ctx->group;
-	struct spdk_bdev_node *node = ctx->node;
-	struct spdk_bdev *bdev = spdk_bdev_desc_get_bdev(node->desc);
+	struct spdk_bdev_channel *bdev_ch = spdk_io_channel_get_ctx(io_ch);
 
-	/* Now when QoS is not enabled for the group, proceed with the detach */
+	bdev_ch_destroy_group_channel(bdev_ch);
 
-	/* Set bdev's group pointer to NULL */
-	bdev->internal.group = NULL;
-	/* Clear the in-progress flag, so QoS changes are allowed again */
-	__atomic_clear(&group->qos_mod_in_progress, __ATOMIC_RELAXED);
-	/* Make sure that the previous group pointer is not referenced anymore */
-	spdk_bdev_for_each_channel(
-		bdev, bdev_group_remove_msg, ctx, bdev_group_remove_done);
+	spdk_bdev_for_each_channel_continue(i, 0);
 }
 
 void
@@ -10487,14 +10536,8 @@ spdk_bdev_group_remove_bdev(struct spdk_bdev_group *group,
 	ctx->cb_fn = cb_fn;
 	ctx->cb_arg = cb_arg;
 
-	/* NOTE: it's safe to check group->qos here, as it's protected by the in-progress atomic */
-	if (!group->qos) {
-		/* if QoS is not enabled for the group, proceed with the detach */
-		bdev_group_remove_set_qos_rate_limits_cb(ctx, 0);
-	} else {
-		/* if QoS is enabled for the group, firts we have to disable it for the bdev */
-		bdev_set_qos_group_rate_limits(bdev, true, bdev_group_remove_set_qos_rate_limits_cb, ctx);
-	}
+	spdk_bdev_for_each_channel(bdev, bdev_group_remove_bdev_msg, ctx,
+				   bdev_group_remove_bdev_msg_done);
 }
 
 int
@@ -10532,34 +10575,85 @@ spdk_bdev_group_get_qos_rate_limits(struct spdk_bdev_group *group, uint64_t *lim
 
 struct bdev_group_set_qos_rate_limits_ctx {
 	struct spdk_bdev_group *group;
-	uint64_t ref_cnt;
-	struct spdk_bdev_qos *old_qos;
 	void (*cb_fn)(void *cb_arg, int status);
 	void *cb_arg;
-	int status;
 };
 
 static void
-bdev_group_set_qos_rate_limits_cb(void *cb_arg, int status)
+bdev_group_set_qos_rate_limits_cb(struct bdev_group_set_qos_rate_limits_ctx *ctx, int status)
+{
+	ctx->cb_fn(ctx->cb_arg, status);
+	__atomic_clear(&ctx->group->qos_mod_in_progress, __ATOMIC_RELAXED);
+	free(ctx);
+}
+
+static void
+bdev_group_enable_qos_msg(struct spdk_io_channel_iter *i)
+{
+	struct spdk_io_channel *_ch = spdk_io_channel_iter_get_channel(i);
+	struct spdk_bdev_group_channel *group_ch = spdk_io_channel_get_ctx(_ch);
+	struct spdk_bdev_group *group = group_ch->group;
+	struct spdk_bdev_channel *bdev_ch;
+
+	assert(group != NULL);
+
+	spdk_spin_lock(&group->spinlock);
+
+	bdev_group_enable_qos(group);
+
+	TAILQ_FOREACH(bdev_ch, &group_ch->bdev_ch_list, tailq) {
+		bdev_ch_enable_qos_group(bdev_ch, group);
+	}
+
+	spdk_spin_unlock(&group->spinlock);
+
+	spdk_for_each_channel_continue(i, 0);
+}
+
+static void
+bdev_group_enable_qos_msg_done(struct spdk_io_channel_iter *i, int status)
+{
+	struct bdev_group_set_qos_rate_limits_ctx *ctx = spdk_io_channel_iter_get_ctx(i);
+
+	bdev_group_set_qos_rate_limits_cb(ctx, status);
+}
+
+static void
+bdev_group_disable_qos_msg(struct spdk_io_channel_iter *i)
+{
+	struct spdk_io_channel *_ch = spdk_io_channel_iter_get_channel(i);
+	struct spdk_bdev_group_channel *group_ch = spdk_io_channel_get_ctx(_ch);
+	struct spdk_bdev_channel *bdev_ch;
+
+	TAILQ_FOREACH(bdev_ch, &group_ch->bdev_ch_list, tailq) {
+		bdev_ch_disable_qos_group(bdev_ch);
+	}
+
+	spdk_for_each_channel_continue(i, 0);
+}
+
+static void
+bdev_group_disable_qos_msg_done(struct spdk_io_channel_iter *i, int status)
+{
+	struct bdev_group_set_qos_rate_limits_ctx *ctx = spdk_io_channel_iter_get_ctx(i);
+	struct spdk_bdev_group *group = ctx->group;
+
+	bdev_group_disable_qos(group);
+
+	bdev_group_set_qos_rate_limits_cb(ctx, status);
+}
+
+static void
+bdev_group_update_qos_rate_limit_msg(void *cb_arg)
 {
 	struct bdev_group_set_qos_rate_limits_ctx *ctx = cb_arg;
-	uint64_t ref_cnt;
+	struct spdk_bdev_group *group = ctx->group;
 
-	if (status != 0) {
-		ctx->status = status;
-	}
+	spdk_spin_lock(&group->spinlock);
+	bdev_qos_limits_update_max_quota_per_timeslice(&group->qos->limits);
+	spdk_spin_unlock(&group->spinlock);
 
-	/* de-reference */
-	ref_cnt = __atomic_sub_fetch(&ctx->ref_cnt, 1, __ATOMIC_RELAXED);
-	if (!ref_cnt) { /* if there'are no mo references, we're done */
-		ctx->cb_fn(ctx->cb_arg, ctx->status);
-		__atomic_clear(&ctx->group->qos_mod_in_progress, __ATOMIC_RELAXED);
-		 /* old group QoS limits can now be freed */
-		if (ctx->old_qos) {
-			bdev_qos_destroy(ctx->old_qos);
-		}
-		free(ctx);
-	}
+	bdev_group_set_qos_rate_limits_cb(ctx, 0);
 }
 
 void
@@ -10568,8 +10662,6 @@ spdk_bdev_group_set_qos_rate_limits(struct spdk_bdev_group *group, const uint64_
 				    void *cb_arg)
 {
 	struct bdev_group_set_qos_rate_limits_ctx *ctx;
-	struct spdk_bdev_node *node;
-	struct spdk_bdev_qos *new_qos = NULL;
 	bool qos_mod_in_progress;
 	bool disable_rate_limit;
 
@@ -10586,50 +10678,46 @@ spdk_bdev_group_set_qos_rate_limits(struct spdk_bdev_group *group, const uint64_
 		return;
 	}
 
+	ctx->cb_fn = cb_fn;
+	ctx->cb_arg = cb_arg;
+	ctx->group = group;
+
 	spdk_spin_lock(&group->spinlock);
 
 	disable_rate_limit = bdev_qos_limits_check_disabled(limits);
 
 	if (!disable_rate_limit) {
-		/* Allocate and init new group QoS limits */
-		new_qos = bdev_qos_create();
-		if (new_qos == NULL) {
-			SPDK_ERRLOG("Unable to allocate QoS Limits\n");
-			cb_fn(cb_arg, -ENOMEM);
-			return;
+		if (group->qos == NULL) {
+			group->qos = bdev_qos_create();
+			if (group->qos == NULL) {
+				spdk_spin_unlock(&group->spinlock);
+				SPDK_ERRLOG("Unable to allocate QoS Limits\n");
+				bdev_group_set_qos_rate_limits_cb(ctx, -ENOMEM);
+				return;
+			}
 		}
 
-		bdev_qos_limits_set(&new_qos->limits, limits);
-		bdev_qos_limits_update_max_quota_per_timeslice(&new_qos->limits);
+		memcpy(group->qos_limits_usr_cfg, limits, sizeof(group->qos_limits_usr_cfg));
+		bdev_qos_limits_set(&group->qos->limits, limits);
 
-		new_qos->last_timeslice = spdk_get_ticks();
-		new_qos->timeslice_size =
-			SPDK_BDEV_QOS_TIMESLICE_IN_USEC * spdk_get_ticks_hz() / SPDK_SEC_TO_USEC;
+		if (group->qos->ch == NULL) {
+			bdev_qos_limits_update_max_quota_per_timeslice(&group->qos->limits);
 
+			spdk_for_each_channel(group, bdev_group_enable_qos_msg, ctx,
+					      bdev_group_enable_qos_msg_done);
+		} else {
+			spdk_thread_send_msg(spdk_io_channel_get_thread(group->qos->ch),
+					     bdev_group_update_qos_rate_limit_msg, ctx);
+		}
+	} else if (group->qos != NULL) {
+		spdk_for_each_channel(group, bdev_group_disable_qos_msg, ctx,
+				      bdev_group_disable_qos_msg_done);
+	} else {
+		spdk_spin_unlock(&group->spinlock);
+
+		bdev_group_set_qos_rate_limits_cb(ctx, 0);
+		return;
 	}
-
-	/* Store new group QoS limits config */
-	memcpy(group->qos_limits_usr_cfg, limits, sizeof(group->qos_limits_usr_cfg));
-
-	/* Store the old QoS group limits */
-	ctx->old_qos = group->qos;
-
-	/* Store the new QoS group limits */
-	group->qos = new_qos;
-
-	/* Replace the group QoS limits */
-	ctx->ref_cnt = 1; /* reference by the caller */
-	ctx->cb_fn = cb_fn;
-	ctx->cb_arg = cb_arg;
-	ctx->group = group;
-
-	TAILQ_FOREACH(node, &group->bdevs, link) {
-		__atomic_add_fetch(&ctx->ref_cnt, 1, __ATOMIC_RELAXED); /* add reference by the device */
-		bdev_set_qos_group_rate_limits(spdk_bdev_desc_get_bdev(node->desc), disable_rate_limit,
-					       bdev_group_set_qos_rate_limits_cb, ctx);
-	}
-
-	bdev_group_set_qos_rate_limits_cb(ctx, 0); /* release the reference by the caller */
 
 	spdk_spin_unlock(&group->spinlock);
 }
@@ -10655,6 +10743,9 @@ bdev_group_destroy_cb(void *_ctx, int status)
 	} else {
 		ctx->cb_fn(ctx->cb_arg, 0);
 		spdk_spin_destroy(&group->spinlock);
+
+		spdk_io_device_unregister(group, NULL);
+
 		free(group->name);
 		free(group);
 		free(ctx);
