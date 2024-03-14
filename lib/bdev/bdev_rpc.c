@@ -29,6 +29,8 @@ static const struct spdk_json_object_decoder rpc_set_bdev_opts_decoders[] = {
 	{"bdev_auto_examine", offsetof(struct spdk_bdev_opts, bdev_auto_examine), spdk_json_decode_bool, true},
 	{"iobuf_small_cache_size", offsetof(struct spdk_bdev_opts, iobuf_small_cache_size), spdk_json_decode_uint32, true},
 	{"iobuf_large_cache_size", offsetof(struct spdk_bdev_opts, iobuf_large_cache_size), spdk_json_decode_uint32, true},
+	{"qos_io_slice", offsetof(struct spdk_bdev_opts, qos_io_slice), spdk_json_decode_uint32, true},
+	{"qos_byte_slice", offsetof(struct spdk_bdev_opts, qos_byte_slice), spdk_json_decode_uint32, true},
 };
 
 static void

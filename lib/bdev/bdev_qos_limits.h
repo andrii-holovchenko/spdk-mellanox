@@ -35,33 +35,56 @@ struct bdev_qos_limit {
 	/** Maximum allowed IOs or bytes to be issued in one timeslice (e.g., 1ms). */
 	uint32_t max_per_timeslice;
 
+	/** Slice of IOs or bytes allocated from the global pool. */
+	uint32_t slice_per_borrow;
+};
+
+struct bdev_qos_limit_cache {
+	/** Remaining IOs or bytes allocated from the global pool in the current
+	 *  timeslice. If fully consumed, allocate another slice from the global
+	 *  pool again.
+	 */
+	int64_t remaining;
+
 	/** Function to check whether to queue the IO.
 	 * If The IO is allowed to pass, the quota will be reduced correspondingly.
 	 */
-	bool (*queue_io)(struct bdev_qos_limit *limit, struct spdk_bdev_io *io);
+	bool (*queue_io)(struct bdev_qos_limit_cache *cache,
+			 struct bdev_qos_limit *limit, struct spdk_bdev_io *io);
 
 	/** Function to rewind the quota once the IO was allowed to be sent by this
 	 * limit but queued due to one of the further limits.
 	 */
-	void (*rewind_quota)(struct bdev_qos_limit *limit, struct spdk_bdev_io *io);
+	void (*rewind_quota)(struct bdev_qos_limit_cache *cache,
+			     struct bdev_qos_limit *limit, struct spdk_bdev_io *io);
 };
 
 struct bdev_qos_limits {
 	struct bdev_qos_limit rate_limits[SPDK_BDEV_QOS_NUM_RATE_LIMIT_TYPES];
 };
 
-void bdev_qos_limits_init(struct bdev_qos_limits *limits);
+struct bdev_qos_limits_cache {
+	struct bdev_qos_limit_cache rate_limits[SPDK_BDEV_QOS_NUM_RATE_LIMIT_TYPES];
+};
+
+void bdev_qos_limits_cache_init(struct bdev_qos_limits_cache *caches,
+				struct bdev_qos_limits *limits);
+void bdev_qos_limits_cache_reset(struct bdev_qos_limits_cache *caches);
+
+void bdev_qos_limits_init(struct bdev_qos_limits *limits, uint32_t io_slice, uint32_t byte_slice);
 void bdev_qos_limits_set(struct bdev_qos_limits *limits,
 			 const uint64_t *values);
 void bdev_qos_limits_update_max_quota_per_timeslice(
 	struct bdev_qos_limits *limits);
-bool bdev_qos_limits_queue_io(struct bdev_qos_limits *limits,
+bool bdev_qos_limits_queue_io(struct bdev_qos_limits_cache *cache,
+			      struct bdev_qos_limits *limits,
 			      struct spdk_bdev_io *bdev_io);
 void bdev_qos_limits_reset_quota(struct bdev_qos_limits *limits,
 				 uint64_t now,
 				 uint64_t timeslice_size,
 				 uint64_t *last_timeslice);
-void bdev_qos_limits_rewind(struct bdev_qos_limits *limits,
+void bdev_qos_limits_rewind(struct bdev_qos_limits_cache *caches,
+			    struct bdev_qos_limits *limits,
 			    struct spdk_bdev_io *bdev_io);
 bool bdev_qos_limits_check_disabled(const uint64_t *limits);
 

@@ -208,7 +208,9 @@ if __name__ == "__main__":
                                   bdev_io_cache_size=args.bdev_io_cache_size,
                                   bdev_auto_examine=args.bdev_auto_examine,
                                   iobuf_small_cache_size=args.iobuf_small_cache_size,
-                                  iobuf_large_cache_size=args.iobuf_large_cache_size)
+                                  iobuf_large_cache_size=args.iobuf_large_cache_size,
+                                  qos_io_slice=args.qos_io_slice,
+                                  qos_byte_slice=args.qos_byte_slice)
 
     p = subparsers.add_parser('bdev_set_options',
                               help="""Set options of bdev subsystem""")
@@ -219,6 +221,8 @@ if __name__ == "__main__":
     group.add_argument('-d', '--disable-auto-examine', dest='bdev_auto_examine', help='Not allow to auto examine', action='store_false')
     p.add_argument('--iobuf-small-cache-size', help='Size of the small iobuf per thread cache', type=int)
     p.add_argument('--iobuf-large-cache-size', help='Size of the large iobuf per thread cache', type=int)
+    p.add_argument('--qos-io-slice', help='QoS IO slice allocated from global pool to local cache', type=int)
+    p.add_argument('--qos-byte-slice', help='QoS byte slice allocated from global pool to local cache', type=int)
     p.set_defaults(bdev_auto_examine=True)
     p.set_defaults(func=bdev_set_options)
 

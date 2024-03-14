@@ -1172,10 +1172,14 @@ io_during_qos_queue(void)
 	struct spdk_bdev_channel *bdev_ch[2];
 	struct spdk_bdev *bdev;
 	enum spdk_bdev_io_status status0, status1, status2;
+	uint32_t qos_io_slice;
 	int rc;
 
 	setup_test();
 	MOCK_SET(spdk_get_ticks, 0);
+
+	qos_io_slice = g_bdev_opts.qos_io_slice;
+	g_bdev_opts.qos_io_slice = 1;
 
 	/* Enable QoS */
 	bdev = &g_bdev.bdev;
@@ -1260,6 +1264,8 @@ io_during_qos_queue(void)
 	set_thread(0);
 	spdk_put_io_channel(io_ch[0]);
 	poll_threads();
+
+	g_bdev_opts.qos_io_slice = qos_io_slice;
 
 	teardown_test();
 }
