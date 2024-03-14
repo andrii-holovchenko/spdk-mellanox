@@ -4116,25 +4116,18 @@ bdev_qos_create(struct spdk_bdev *bdev)
 	return 0;
 }
 
-static int
-bdev_qos_destroy(struct spdk_bdev *bdev)
+static void
+bdev_qos_destroy(struct spdk_bdev_qos *qos)
 {
-	struct spdk_bdev_qos *old_qos;
-
-	old_qos = bdev->internal.qos;
-	bdev->internal.qos = NULL;
-
-	if (old_qos->thread == NULL) {
-		free(old_qos);
+	if (qos->thread == NULL) {
+		free(qos);
 	} else {
-		spdk_thread_send_msg(old_qos->thread, bdev_qos_channel_destroy, old_qos);
+		spdk_thread_send_msg(qos->thread, bdev_qos_channel_destroy, qos);
 	}
 
 	/* It is safe to continue with destroying the bdev even though the QoS channel hasn't
 	 * been destroyed yet. The destruction path will end up waiting for the final
 	 * channel to be put before it releases resources. */
-
-	return 0;
 }
 
 void
@@ -8169,12 +8162,8 @@ bdev_close(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc)
 		SPDK_DEBUGLOG(bdev, "Closed last descriptor for bdev %s on thread %p. Stopping QoS.\n",
 			      bdev->name, spdk_get_thread());
 
-		if (bdev_qos_destroy(bdev)) {
-			/* There isn't anything we can do to recover here. Just let the
-			 * old QoS poller keep running. The QoS handling won't change
-			 * cores when the user allocates a new channel, but it won't break. */
-			SPDK_ERRLOG("Unable to shut down QoS poller. It will continue running on the current thread.\n");
-		}
+		bdev_qos_destroy(bdev->internal.qos);
+		bdev->internal.qos = NULL;
 	}
 
 	if (bdev->internal.status == SPDK_BDEV_STATUS_REMOVING && TAILQ_EMPTY(&bdev->internal.open_descs)) {
@@ -8916,10 +8905,9 @@ bdev_set_qos_limit_done(struct set_qos_limit_ctx *ctx, int status)
 }
 
 static void
-bdev_disable_qos_done(void *cb_arg)
+bdev_disable_qos_msg_done(struct spdk_bdev *bdev, void *_ctx, int status)
 {
-	struct set_qos_limit_ctx *ctx = cb_arg;
-	struct spdk_bdev *bdev = ctx->bdev;
+	struct set_qos_limit_ctx *ctx = _ctx;
 	struct spdk_bdev_qos *qos;
 
 	spdk_spin_lock(&bdev->internal.spinlock);
@@ -8927,31 +8915,9 @@ bdev_disable_qos_done(void *cb_arg)
 	bdev->internal.qos = NULL;
 	spdk_spin_unlock(&bdev->internal.spinlock);
 
-	if (qos->thread != NULL) {
-		spdk_put_io_channel(spdk_io_channel_from_ctx(qos->ch));
-		spdk_poller_unregister(&qos->poller);
-	}
-
-	free(qos);
+	bdev_qos_destroy(qos);
 
 	bdev_set_qos_limit_done(ctx, 0);
-}
-
-static void
-bdev_disable_qos_msg_done(struct spdk_bdev *bdev, void *_ctx, int status)
-{
-	struct set_qos_limit_ctx *ctx = _ctx;
-	struct spdk_thread *thread;
-
-	spdk_spin_lock(&bdev->internal.spinlock);
-	thread = bdev->internal.qos->thread;
-	spdk_spin_unlock(&bdev->internal.spinlock);
-
-	if (thread != NULL) {
-		spdk_thread_send_msg(thread, bdev_disable_qos_done, ctx);
-	} else {
-		bdev_disable_qos_done(ctx);
-	}
 }
 
 static void
