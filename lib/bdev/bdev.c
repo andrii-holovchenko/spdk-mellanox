@@ -8955,13 +8955,9 @@ bdev_disable_qos_msg_done(struct spdk_bdev *bdev, void *_ctx, int status)
 }
 
 static void
-bdev_disable_qos_msg(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
-		     struct spdk_io_channel *ch, void *_ctx)
+bdev_ch_unthrottle_qos_queued_io(struct spdk_bdev_channel *bdev_ch)
 {
-	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(ch);
 	struct spdk_bdev_io *bdev_io;
-
-	bdev_ch->flags &= ~BDEV_CH_QOS_ENABLED;
 
 	while (!TAILQ_EMPTY(&bdev_ch->qos_queued_io)) {
 		/* Re-submit the queued I/O. */
@@ -8969,6 +8965,17 @@ bdev_disable_qos_msg(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
 		TAILQ_REMOVE(&bdev_ch->qos_queued_io, bdev_io, internal.link);
 		_bdev_io_submit(bdev_io);
 	}
+}
+
+static void
+bdev_disable_qos_msg(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
+		     struct spdk_io_channel *ch, void *_ctx)
+{
+	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(ch);
+
+	bdev_ch->flags &= ~BDEV_CH_QOS_ENABLED;
+
+	bdev_ch_unthrottle_qos_queued_io(bdev_ch);
 
 	spdk_bdev_for_each_channel_continue(i, 0);
 }
