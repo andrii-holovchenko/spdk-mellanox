@@ -2589,10 +2589,10 @@ bdev_qos_queue_io(struct spdk_bdev_qos *qos, struct spdk_bdev_io *bdev_io)
 }
 
 static int
-bdev_qos_io_submit(struct spdk_bdev_channel *ch, struct spdk_bdev_qos *qos)
+bdev_ch_submit_qos_queued_io(struct spdk_bdev_channel *ch, struct spdk_bdev_qos *qos)
 {
-	struct spdk_bdev_io		*bdev_io = NULL, *tmp = NULL;
-	int				submitted_ios = 0;
+	struct spdk_bdev_io	*bdev_io = NULL, *tmp = NULL;
+	int			submitted_ios = 0;
 
 	TAILQ_FOREACH_SAFE(bdev_io, &ch->qos_queued_io, internal.link, tmp) {
 		if (!bdev_qos_queue_io(qos, bdev_io)) {
@@ -3257,7 +3257,7 @@ _bdev_io_submit(void *ctx)
 			_bdev_io_complete_in_submit(bdev_ch, bdev_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		} else {
 			TAILQ_INSERT_TAIL(&bdev_ch->qos_queued_io, bdev_io, internal.link);
-			bdev_qos_io_submit(bdev_ch, bdev->internal.qos);
+			bdev_ch_submit_qos_queued_io(bdev_ch, bdev->internal.qos);
 		}
 	} else {
 		SPDK_ERRLOG("unknown bdev_ch flag %x found\n", bdev_ch->flags);
@@ -3518,7 +3518,7 @@ bdev_ch_retry_qos_queued_io(struct spdk_bdev_channel_iter *i, struct spdk_bdev *
 	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(io_ch);
 	int status;
 
-	bdev_qos_io_submit(bdev_ch, bdev->internal.qos);
+	bdev_ch_submit_qos_queued_io(bdev_ch, bdev->internal.qos);
 
 	/* if all IOs were sent then continue the iteration, otherwise - stop it */
 	/* TODO: channels round robing */
