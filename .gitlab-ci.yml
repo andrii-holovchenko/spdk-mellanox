@@ -1,3 +1,7 @@
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
 stages:
     - build
     - test
@@ -24,7 +28,6 @@ build-job:
         - cd ../fio-fio-3.35
         - ./configure --prefix=/usr/local
         - cd $CI_PROJECT_DIR
-        - ./scripts/check_format.sh
         - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --target-arch=znver3
         - make -j4
         - find test -type f -perm 0755 |egrep -v '\.sh|\.py|\.pl|\/match' |tar cf .test.tar -T /dev/stdin
@@ -58,4 +61,54 @@ test-job:
         - sudo ./test/unit/unittest.sh
         - sudo ./autotest.sh $HOME/autorun-spdk.conf
         - sudo chown -R $USER $CI_PROJECT_DIR
-########
+
+coverity-job:
+    stage: build
+    rules:
+        - changes:
+            - .ci/
+            - packaging/
+            - go/
+            - rpmbuild/
+          when: never
+        - when: on_success
+    tags: [ k8s, mtr, linux, x86_64 ]
+    image: "$COV_IMAGE"
+    script:
+        - apt update
+        - ./scripts/pkgdep.sh
+        - ./configure --with-rdma=mlx5_dv --disable-unit-tests
+        - cov-build --dir cov_build make -j 4
+        - cov-analyze --jobs auto --security --concurrency --dir cov_build
+        - cov-format-errors --dir cov_build --html-output cov_build/html
+        - nr=$(cov-format-errors --dir cov_build |& awk '/Processing [0-9]+ errors?/ { print $2 }')
+        - exit $nr
+    variables:
+        GIT_SUBMODULE_STRATEGY: recursive
+        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/cov/bin
+        CC: gcc-9
+    allow_failure: true
+    artifacts:
+        name: coverity
+        paths:
+            - cov_build/html/
+        expire_in: 1 week
+        when: always
+
+code-style-job:
+    stage: build
+    rules:
+        - changes:
+            - .ci/
+            - packaging/
+            - go/
+            - rpmbuild/
+          when: never
+        - when: on_success
+    tags: [ k8s, mtr, linux, x86_64 ]
+    image: "$COV_IMAGE"
+    script:
+        - apt update
+        - ./scripts/pkgdep.sh --developer-tools
+        - ./scripts/check_format.sh
+    allow_failure: true
