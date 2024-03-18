@@ -2895,7 +2895,7 @@ nvme_tcp_qpair_cmd_send_complete(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_
 		SPDK_DEBUGLOG(nvme, "tcp req %p, send H2C data\n", tcp_req);
 		nvme_tcp_send_h2c_data(tcp_req);
 	} else {
-		if (group && tcp_req->iobuf_iov.iov_base) {
+		if (group && tcp_req->ordering.bits.in_capsule_data && tcp_req->iobuf_iov.iov_base) {
 			spdk_iobuf_put(group->group->accel_fn_table.get_iobuf_channel(group->group->ctx),
 				       tcp_req->iobuf_iov.iov_base,
 				       tcp_req->iobuf_iov.iov_len);
@@ -4320,11 +4320,6 @@ nvme_tcp_accel_seq_finished_h2c_cb(void *cb_arg, int status)
 		MAKE_DIGEST_WORD((uint8_t *)ddgst, ddgst_tmp);
 	}
 
-	/* Once copy task is finished, we use a single staging buffer.
-	 * To reuse existing functions to build a capsule, remove reset_sgl_fn since
-	 * it is not needed any more and overwrite contig_or_cb_arg with address of the
-	 * staging buffer
-	 */
 	rsp_pdu->iovs = &tcp_req->iobuf_iov;
 	rsp_pdu->data_iovcnt = 1;
 	rsp_pdu->iovcnt = rsp_pdu->data_iovcnt + rsp_pdu->has_capsule + rsp_pdu->ddgst_enable;
