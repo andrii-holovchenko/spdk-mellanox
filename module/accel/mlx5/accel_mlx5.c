@@ -2101,7 +2101,6 @@ accel_mlx5_crypto_task_continue(struct accel_mlx5_task *task)
 	if (task->num_ops == 0) {
 		rc = accel_mlx5_task_alloc_mkeys(task, dev->crypto_mkeys);
 		if (spdk_unlikely(rc != 0)) {
-			accel_mlx5_dev_nomem_task_mkey(dev, task);
 			return -ENOMEM;
 		}
 	}
@@ -2696,9 +2695,6 @@ accel_mlx5_crypto_task_init(struct accel_mlx5_task *mlx5_task)
 	}
 
 	if (spdk_unlikely(accel_mlx5_task_alloc_mkeys(mlx5_task, dev->crypto_mkeys))) {
-		/* Pool is empty, queue this task */
-		SPDK_DEBUGLOG(accel_mlx5, "no reqs in pool, dev %s\n",
-			      dev->pd_ref->context->device->name);
 		return -ENOMEM;
 	}
 	SPDK_DEBUGLOG(accel_mlx5, "crypto task num_reqs %u, num_ops %u, num_blocks %u, src_len %zu\n",
