@@ -1455,13 +1455,14 @@ spdk_accel_append_copy_crc32c(struct spdk_accel_sequence **pseq, struct spdk_io_
 	}
 
 	task->dst_domain = dst_domain;
-	task->src_domain_ctx = dst_domain_ctx;
+	task->dst_domain_ctx = dst_domain_ctx;
 	task->d.iovs = dst_iovs;
 	task->d.iovcnt = dst_iovcnt;
 	task->src_domain = src_domain;
 	task->src_domain_ctx = src_domain_ctx;
 	task->s.iovs = src_iovs;
 	task->s.iovcnt = src_iovcnt;
+	task->nbytes = accel_get_iovlen(src_iovs, src_iovcnt);
 	task->crc_dst = crc_dst;
 	task->seed = seed;
 	task->op_code = SPDK_ACCEL_OPC_COPY_CRC32C;
