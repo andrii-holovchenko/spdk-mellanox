@@ -3044,7 +3044,15 @@ _bdev_rw_split(void *_bdev_io)
 							 * a block size, an error exit.
 							 */
 							if (bdev_io->u.bdev.split_outstanding == 0) {
+								int j;
+
 								SPDK_ERRLOG("The first child io was less than a block size\n");
+								SPDK_ERRLOG("To last block bytes %u, to next boundary %u; parent iovpos %u, iovcnt %u, iovs:\n",
+									    to_last_block_bytes, to_next_boundary_bytes, parent_iovpos, bdev_io->u.bdev.iovcnt);
+								for (j = 0; j < bdev_io->u.bdev.iovcnt; j++) {
+									SPDK_ERRLOG("\tiov[%u] %p %zu\n", j, bdev_io->u.bdev.iovs[j].iov_base,
+										    bdev_io->u.bdev.iovs[j].iov_len);
+								}
 								bdev_io->internal.status = SPDK_BDEV_IO_STATUS_FAILED;
 								spdk_trace_record(TRACE_BDEV_IO_DONE, 0, 0, (uintptr_t)bdev_io, bdev_io->internal.caller_ctx);
 								TAILQ_REMOVE(&bdev_io->internal.ch->io_submitted, bdev_io, internal.ch_link);

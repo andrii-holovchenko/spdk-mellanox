@@ -2534,6 +2534,44 @@ bdev_io_max_size_and_segment_split_test(void)
 	CU_ASSERT(g_io_done == true);
 	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 0);
 
+	/* Test that child iov is aligned on block size */
+	bdev->max_segment_size = 0;
+	bdev->max_num_segments = 16;
+	g_io_done = false;
+
+	for (i = 0; i < 15; i++) {
+		iov[i].iov_base = (void *)((i + 1) * 0x10000);
+		iov[i].iov_len = 1024;
+	}
+	iov[15].iov_base = (void *)((15 + 1) * 0x10000);
+	iov[15].iov_len = 1025;
+
+	/* The 17th iov is not block aligned, it goes to the new child IO */
+	iov[16].iov_base = (void *)((16 + 1) * 0x10000);
+	iov[16].iov_len = 1023;
+
+	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_READ, 64, 16384, 16);
+	for (i = 0; i < 15; i++) {
+		ut_expected_io_set_iov(expected_io, i, iov[i].iov_base, iov[i].iov_len);
+	}
+	ut_expected_io_set_iov(expected_io, 15, iov[15].iov_base, 1024);
+	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
+
+	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_READ, 96, 1024, 2);
+	ut_expected_io_set_iov(expected_io, 0, (char *)iov[15].iov_base + 1024, 1);
+	ut_expected_io_set_iov(expected_io, 1, iov[16].iov_base, iov[16].iov_len);
+	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
+
+	rc = spdk_bdev_readv_blocks(desc, io_ch, iov, 17, 64, 34, io_done, NULL);
+	CU_ASSERT(rc == 0);
+	CU_ASSERT(g_io_done == false);
+
+	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 2);
+	rc = stub_complete_io(2);
+	CU_ASSERT(rc == 2);
+	CU_ASSERT(g_io_done == true);
+	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 0);
+
 	/* Test an WRITE_ZEROES.  This should also not be split. */
 	bdev->max_segment_size = 512;
 	bdev->max_num_segments = 1;
