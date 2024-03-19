@@ -39,7 +39,7 @@ rpc_bdev_group_create(struct spdk_jsonrpc_request *request, const struct spdk_js
 	if (spdk_json_decode_object(params, rpc_construct_group_decoders,
 				    SPDK_COUNTOF(rpc_construct_group_decoders),
 				    &req)) {
-		SPDK_DEBUGLOG(bdev_group, "spdk_json_decode_object failed\n");
+		SPDK_DEBUGLOG(bdev, "spdk_json_decode_object failed\n");
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "spdk_json_decode_object failed");
 		goto cleanup;
@@ -47,7 +47,7 @@ rpc_bdev_group_create(struct spdk_jsonrpc_request *request, const struct spdk_js
 
 	group = spdk_bdev_group_get_by_name(req.name);
 	if (group) {
-		SPDK_DEBUGLOG(bdev_group, "group %s already exists\n", req.name);
+		SPDK_DEBUGLOG(bdev, "group %s already exists\n", req.name);
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "group already exists");
 		goto cleanup;
@@ -55,7 +55,7 @@ rpc_bdev_group_create(struct spdk_jsonrpc_request *request, const struct spdk_js
 
 	group = spdk_bdev_group_create(req.name);
 	if (!group) {
-		SPDK_DEBUGLOG(bdev_group, "cannot create group %s\n", req.name);
+		SPDK_DEBUGLOG(bdev, "cannot create group %s\n", req.name);
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "cannot create group");
 		goto cleanup;
@@ -96,7 +96,7 @@ rpc_bdev_group_add_bdev(struct spdk_jsonrpc_request *request, const struct spdk_
 	if (spdk_json_decode_object(params, rpc_bdev_group_bdev_decoders,
 				    SPDK_COUNTOF(rpc_bdev_group_bdev_decoders),
 				    &req)) {
-		SPDK_DEBUGLOG(bdev_group, "spdk_json_decode_object failed\n");
+		SPDK_DEBUGLOG(bdev, "spdk_json_decode_object failed\n");
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "spdk_json_decode_object failed");
 		goto cleanup;
@@ -104,7 +104,7 @@ rpc_bdev_group_add_bdev(struct spdk_jsonrpc_request *request, const struct spdk_
 
 	group = spdk_bdev_group_get_by_name(req.name);
 	if (!group) {
-		SPDK_DEBUGLOG(bdev_group, "cannot find group %s\n", req.name);
+		SPDK_DEBUGLOG(bdev, "cannot find group %s\n", req.name);
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "group doesn't exist");
 		goto cleanup;
@@ -126,7 +126,7 @@ rpc_bdev_group_remove_bdev(struct spdk_jsonrpc_request *request, const struct sp
 	if (spdk_json_decode_object(params, rpc_bdev_group_bdev_decoders,
 				    SPDK_COUNTOF(rpc_bdev_group_bdev_decoders),
 				    &req)) {
-		SPDK_DEBUGLOG(bdev_group, "spdk_json_decode_object failed\n");
+		SPDK_DEBUGLOG(bdev, "spdk_json_decode_object failed\n");
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "spdk_json_decode_object failed");
 		goto cleanup;
@@ -134,7 +134,7 @@ rpc_bdev_group_remove_bdev(struct spdk_jsonrpc_request *request, const struct sp
 
 	group = spdk_bdev_group_get_by_name(req.name);
 	if (!group) {
-		SPDK_DEBUGLOG(bdev_group, "cannot find group %s\n", req.name);
+		SPDK_DEBUGLOG(bdev, "cannot find group %s\n", req.name);
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "group doesn't exist");
 		goto cleanup;
@@ -168,7 +168,7 @@ rpc_bdev_group_delete(struct spdk_jsonrpc_request *request, const struct spdk_js
 	if (spdk_json_decode_object(params, rpc_construct_group_decoders,
 				    SPDK_COUNTOF(rpc_construct_group_decoders),
 				    &req)) {
-		SPDK_DEBUGLOG(bdev_group, "spdk_json_decode_object failed\n");
+		SPDK_DEBUGLOG(bdev, "spdk_json_decode_object failed\n");
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "spdk_json_decode_object failed");
 		goto cleanup;
@@ -176,7 +176,7 @@ rpc_bdev_group_delete(struct spdk_jsonrpc_request *request, const struct spdk_js
 
 	group = spdk_bdev_group_get_by_name(req.name);
 	if (!group) {
-		SPDK_DEBUGLOG(bdev_group, "cannot find group %s\n", req.name);
+		SPDK_DEBUGLOG(bdev, "cannot find group %s\n", req.name);
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "group doesn't exist");
 		goto cleanup;
@@ -259,7 +259,7 @@ rpc_bdev_group_set_qos_limit(struct spdk_jsonrpc_request *request,
 
 	group = spdk_bdev_group_get_by_name(req.name);
 	if (!group) {
-		SPDK_DEBUGLOG(bdev_group, "cannot find group %s\n", req.name);
+		SPDK_DEBUGLOG(bdev, "cannot find group %s\n", req.name);
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "group doesn't exist");
 		goto cleanup;
@@ -353,7 +353,7 @@ rpc_spdk_bdev_groups_get(struct spdk_jsonrpc_request *request, const struct spdk
 	if (params && spdk_json_decode_object(params, rpc_groups_get_decoders,
 					      SPDK_COUNTOF(rpc_groups_get_decoders),
 					      &ctx)) {
-		SPDK_DEBUGLOG(bdev_group, "spdk_json_decode_object failed\n");
+		SPDK_DEBUGLOG(bdev, "spdk_json_decode_object failed\n");
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "spdk_json_decode_object failed");
 		return;

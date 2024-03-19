@@ -4305,7 +4305,7 @@ bdev_qos_create(void)
 static void
 bdev_qos_destroy(struct spdk_bdev_qos *qos)
 {
-	assert(TAILQ_EMPT(&qos->cache_list));
+	assert(TAILQ_EMPTY(&qos->cache_list));
 
 	if (qos->ch == NULL) {
 		free(qos);
