@@ -3789,6 +3789,11 @@ bdev_qos_cache_destroy(struct spdk_bdev_qos_cache *qos_cache)
 
 	TAILQ_REMOVE(&qos->cache_list, qos_cache, tailq);
 
+	if (TAILQ_EMPTY(&qos->cache_list) && qos->ch == NULL) {
+		SPDK_DEBUGLOG(bdev, "Free QoS %p.\n", qos);
+		free(qos);
+	}
+
 	free(qos_cache);
 }
 
@@ -4284,11 +4289,8 @@ bdev_qos_channel_destroy(void *cb_arg)
 	struct spdk_bdev_qos *qos = cb_arg;
 
 	spdk_put_io_channel(qos->ch);
+	qos->ch = NULL;
 	spdk_poller_unregister(&qos->poller);
-
-	SPDK_DEBUGLOG(bdev, "Free QoS %p.\n", qos);
-
-	free(qos);
 }
 
 static struct spdk_bdev_qos *
@@ -4313,9 +4315,8 @@ bdev_qos_create(void)
 static void
 bdev_qos_destroy(struct spdk_bdev_qos *qos)
 {
-	assert(TAILQ_EMPTY(&qos->cache_list));
-
 	if (qos->ch == NULL) {
+		assert(TAILQ_EMPTY(&qos->cache_list));
 		free(qos);
 	} else {
 		spdk_thread_send_msg(spdk_io_channel_get_thread(qos->ch),
