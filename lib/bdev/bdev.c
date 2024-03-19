@@ -167,6 +167,8 @@ static spdk_bdev_fini_cb	g_fini_cb_fn = NULL;
 static void			*g_fini_cb_arg = NULL;
 static struct spdk_thread	*g_fini_thread = NULL;
 
+struct spdk_bdev_qos_cache;
+
 struct spdk_bdev_qos {
 	/** QoS rate limits. */
 	struct bdev_qos_limits limits;
@@ -182,6 +184,9 @@ struct spdk_bdev_qos {
 
 	/** Poller that processes queued I/O commands each time slice. */
 	struct spdk_poller *poller;
+
+	/** QoS cache list */
+	TAILQ_HEAD(qos_cache_list, spdk_bdev_qos_cache) cache_list;
 };
 
 struct spdk_bdev_qos_cache {
@@ -190,6 +195,11 @@ struct spdk_bdev_qos_cache {
 
 	/** Global QoS rate limits pool */
 	struct spdk_bdev_qos *qos;
+
+	/** Thread on which this cache is located. */
+	struct spdk_thread *thread;
+
+	TAILQ_ENTRY(spdk_bdev_qos_cache) tailq;
 };
 
 struct spdk_bdev_mgmt_channel {
@@ -3561,46 +3571,41 @@ spdk_bdev_dump_info_json(struct spdk_bdev *bdev, struct spdk_json_write_ctx *w)
 }
 
 static void
-bdev_ch_retry_qos_queued_io(struct spdk_bdev_channel_iter *i, struct spdk_bdev *bdev,
-			    struct spdk_io_channel *io_ch, void *ctx)
+bdev_ch_retry_qos_queued_io(struct spdk_io_channel *ch, void *ctx)
 {
-	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(io_ch);
-	int status;
+	struct spdk_bdev_channel *bdev_ch = __io_ch_to_bdev_ch(ch);
 
 	if (bdev_ch->qos_cache != NULL) {
 		bdev_qos_limits_cache_reset(&bdev_ch->qos_cache->limits);
 	}
 
 	bdev_ch_submit_qos_queued_io(bdev_ch);
-
-	/* if all IOs were sent then continue the iteration, otherwise - stop it */
-	/* TODO: channels round robing */
-	status = TAILQ_EMPTY(&bdev_ch->qos_queued_io) ? 0 : 1;
-
-	spdk_bdev_for_each_channel_continue(i, status);
-}
-
-
-static void
-bdev_retry_qos_queued_io_done(struct spdk_bdev *bdev, void *ctx, int status)
-{
-
 }
 
 static void
 bdev_retry_qos_queued_io(struct spdk_bdev *bdev)
 {
 	struct spdk_bdev_qos *qos = bdev->internal.qos;
+	struct spdk_bdev_qos_cache *qos_cache;
 
-	spdk_bdev_for_each_channel(bdev, bdev_ch_retry_qos_queued_io, qos,
-				   bdev_retry_qos_queued_io_done);
+	spdk_spin_lock(&bdev->internal.spinlock);
+
+	TAILQ_FOREACH(qos_cache, &qos->cache_list, tailq) {
+		spdk_io_channel_send_msg(qos_cache->thread, __bdev_to_io_dev(bdev),
+					 bdev_ch_retry_qos_queued_io, NULL);
+	}
+
+	qos_cache = TAILQ_LAST(&qos->cache_list, qos_cache_list);
+	TAILQ_REMOVE(&qos->cache_list, qos_cache, tailq);
+	TAILQ_INSERT_HEAD(&qos->cache_list, qos_cache, tailq);
+
+	spdk_spin_unlock(&bdev->internal.spinlock);
 }
 
 static void
-bdev_group_ch_retry_qos_queued_io(struct spdk_io_channel_iter *i)
+bdev_group_ch_retry_qos_queued_io(struct spdk_io_channel *ch, void *ctx)
 {
-	struct spdk_io_channel *_ch = spdk_io_channel_iter_get_channel(i);
-	struct spdk_bdev_group_channel *group_ch = spdk_io_channel_get_ctx(_ch);
+	struct spdk_bdev_group_channel *group_ch = spdk_io_channel_get_ctx(ch);
 	struct spdk_bdev_channel *bdev_ch;
 
 	if (group_ch->qos_cache != NULL) {
@@ -3610,20 +3615,26 @@ bdev_group_ch_retry_qos_queued_io(struct spdk_io_channel_iter *i)
 	TAILQ_FOREACH(bdev_ch, &group_ch->bdev_ch_list, tailq) {
 		bdev_ch_submit_qos_queued_io(bdev_ch);
 	}
-
-	spdk_for_each_channel_continue(i, 0);
-}
-
-static void
-bdev_group_retry_qos_queued_io_done(struct spdk_io_channel_iter *i, int status)
-{
 }
 
 static void
 bdev_group_retry_qos_queued_io(struct spdk_bdev_group *group)
 {
-	spdk_for_each_channel(group, bdev_group_ch_retry_qos_queued_io, NULL,
-			      bdev_group_retry_qos_queued_io_done);
+	struct spdk_bdev_qos *qos = group->qos;
+	struct spdk_bdev_qos_cache *qos_cache;
+
+	spdk_spin_lock(&group->spinlock);
+
+	TAILQ_FOREACH(qos_cache, &qos->cache_list, tailq) {
+		spdk_io_channel_send_msg(qos_cache->thread, group,
+					 bdev_group_ch_retry_qos_queued_io, NULL);
+	}
+
+	qos_cache = TAILQ_LAST(&qos->cache_list, qos_cache_list);
+	TAILQ_REMOVE(&qos->cache_list, qos_cache, tailq);
+	TAILQ_INSERT_HEAD(&qos->cache_list, qos_cache, tailq);
+
+	spdk_spin_unlock(&group->spinlock);
 }
 
 static int
@@ -3748,6 +3759,8 @@ bdev_qos_cache_create(struct spdk_bdev_qos *qos)
 
 	bdev_qos_limits_cache_init(&qos_cache->limits, &qos->limits);
 	qos_cache->qos = qos;
+	TAILQ_INSERT_TAIL(&qos->cache_list, qos_cache, tailq);
+	qos_cache->thread = spdk_get_thread();
 
 	return qos_cache;
 }
@@ -3755,6 +3768,12 @@ bdev_qos_cache_create(struct spdk_bdev_qos *qos)
 static void
 bdev_qos_cache_destroy(struct spdk_bdev_qos_cache *qos_cache)
 {
+	struct spdk_bdev_qos *qos = qos_cache->qos;
+
+	assert(qos != NULL);
+
+	TAILQ_REMOVE(&qos->cache_list, qos_cache, tailq);
+
 	free(qos_cache);
 }
 
@@ -4268,6 +4287,8 @@ bdev_qos_create(void)
 		return NULL;
 	}
 
+	TAILQ_INIT(&qos->cache_list);
+
 	bdev_qos_limits_init(&qos->limits, g_bdev_opts.qos_io_slice,
 			     g_bdev_opts.qos_byte_slice);
 
@@ -4277,6 +4298,8 @@ bdev_qos_create(void)
 static void
 bdev_qos_destroy(struct spdk_bdev_qos *qos)
 {
+	assert(TAILQ_EMPT(&qos->cache_list));
+
 	if (qos->ch == NULL) {
 		free(qos);
 	} else {
