@@ -4964,7 +4964,7 @@ bdev_update_qd_sampling_period(void *ctx)
 static void
 _tmp_bdev_event_cb(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *ctx)
 {
-	SPDK_NOTICELOG("Unexpected event type: %d\n", type);
+	SPDK_DEBUGLOG(bdev, "Event type: %d\n", type);
 }
 
 void
@@ -5050,8 +5050,6 @@ spdk_bdev_get_current_qd(struct spdk_bdev *bdev, spdk_bdev_get_current_qd_cb cb_
 static void
 _event_notify(struct spdk_bdev_desc *desc, enum spdk_bdev_event_type type)
 {
-	assert(desc->thread == spdk_get_thread());
-
 	spdk_spin_lock(&desc->spinlock);
 	desc->refs--;
 	if (!desc->closed) {
@@ -5085,6 +5083,8 @@ static void
 _resize_notify(void *ctx)
 {
 	struct spdk_bdev_desc *desc = ctx;
+
+	assert(desc->thread == spdk_get_thread());
 
 	_event_notify(desc, SPDK_BDEV_EVENT_RESIZE);
 }
@@ -7733,6 +7733,8 @@ _remove_notify(void *arg)
 {
 	struct spdk_bdev_desc *desc = arg;
 
+	assert(desc->thread == spdk_get_thread());
+
 	_event_notify(desc, SPDK_BDEV_EVENT_REMOVE);
 }
 
@@ -9490,6 +9492,8 @@ static void
 _media_management_notify(void *arg)
 {
 	struct spdk_bdev_desc *desc = arg;
+
+	assert(desc->thread == spdk_get_thread());
 
 	_event_notify(desc, SPDK_BDEV_EVENT_MEDIA_MANAGEMENT);
 }
