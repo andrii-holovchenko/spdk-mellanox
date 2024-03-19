@@ -235,6 +235,9 @@ if [ $(uname -s) = Linux ]; then
 fi
 
 run_test "unittest_accel" $valgrind $testdir/lib/accel/accel.c/accel_ut
+if grep -q '#define SPDK_CONFIG_RDMA_PROV mlx5_dv' $rootdir/include/spdk/config.h; then
+	run_test "unittest_accel_mlx5" $valgrind $testdir/lib/accel/accel_mlx5.c/accel_mlx5_ut
+fi
 run_test "unittest_ioat" $valgrind $testdir/lib/ioat/ioat.c/ioat_ut
 if grep -q '#define SPDK_CONFIG_IDXD 1' $rootdir/include/spdk/config.h; then
 	run_test "unittest_idxd_user" $valgrind $testdir/lib/idxd/idxd_user.c/idxd_user_ut
