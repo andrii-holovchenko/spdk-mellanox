@@ -1,114 +1,110 @@
+---
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
 
 stages:
-    - build
-    - test
+  - build
+  - test
 
-# https://stackoverflow.com/questions/62689235/gitlab-ci-how-to-ignore-directory-using-rules-syntax
+.do_build:
+  # https://stackoverflow.com/questions/62689235/gitlab-ci-how-to-ignore-directory-using-rules-syntax
+  rules:
+    - changes:
+        - .ci/
+        - packaging/
+        - go/
+        - rpmbuild/
+      when: never
+    - when: on_success
+  tags: [k8s, linux, x86_64]
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+    GIT_SUBMODULE_DEPTH: 1
+  hooks:
+    pre_get_sources_script:
+      - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/Mellanox/spdk_team/dpdk.git".insteadOf https://github.com/spdk/dpdk.git
+
 build-job:
-    stage: build
-    rules:
-        - changes:
-            - .ci/
-            - packaging/
-            - go/
-            - rpmbuild/
-          when: never
-        - when: on_success
-    tags: [ k8s, mtr, linux, x86_64 ]
-    # image: harbor.mellanox.com/swx-storage/spdk/x86_64/oraclelinux-8-spdk_dev:20240228c
-    image: harbor.mellanox.com/swx-storage/spdk/x86_64/fedora39-spdk_dev:20240228
-    variables:
-        GIT_SUBMODULE_STRATEGY: recursive
-    script:
-        # GET FIO source, run ./configure
-        - (cd .. ; curl -LO https://github.com/axboe/fio/archive/refs/tags/fio-3.35.tar.gz; tar xf fio-3.35.tar.gz)
-        - cd ../fio-fio-3.35
-        - ./configure --prefix=/usr/local
-        - cd $CI_PROJECT_DIR
-        - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --target-arch=znver3
-        - make -j4
-        - find test -type f -perm 0755 |egrep -v '\.sh|\.py|\.pl|\/match' |tar cf .test.tar -T /dev/stdin
-    artifacts:
-      paths:
-        - ./build
-        - ./dpdk/build/
-        - .test.tar
-        - ./mk/config.mk
-        - ./mk/cc.mk
+  extends: .do_build
+  stage: build
+  image: "$FEDORA_IMAGE"
+  script:
+    # FIXME cache FIO sources && configure results
+    # GET FIO source, run ./configure
+    - (cd .. ; curl -LO https://github.com/axboe/fio/archive/refs/tags/fio-3.35.tar.gz; tar xf fio-3.35.tar.gz)
+    - cd ../fio-fio-3.35
+    - ./configure --prefix=/usr/local
+    - cd $CI_PROJECT_DIR
+    - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --target-arch=znver3
+    - make -j4
+    - find test -type f -perm 0755 |egrep -v '\.sh|\.py|\.pl|\/match' |tar cf .test.tar -T /dev/stdin
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - ./build
+      - ./dpdk/build/
+      - .test.tar
+      - ./mk/config.mk
+      - ./mk/cc.mk
 
 test-job:
-    stage: test
-    rules:
-        - changes:
-            - .ci/
-            - packaging/
-            - go/
-            - rpmbuild/
-          when: never
-        - when: on_success
-    tags: [ vm, mtr, linux, x86_64, f39 ]
-#    variables:
-#        GIT_CHECKOUT: "false"
-#        GIT_CLEAN_FLAGS: "none"
-    script:
-        - patch -p1 < $HOME/spdk-test-nvme.diff
-        - tar xf .test.tar
-          # clean up output of autotest from previous runs
-        - sudo rm -rf $CI_PROJECT_DIR/../output/
-        - sudo ./test/unit/unittest.sh
-        - sudo ./autotest.sh $HOME/autorun-spdk.conf
-        - sudo chown -R $USER $CI_PROJECT_DIR
+  stage: test
+  tags: [vm, linux, x86_64, f39]
+  needs:
+    - job: build-job
+  rules:
+    - changes:
+        - .ci/
+        - packaging/
+        - go/
+        - rpmbuild/
+      when: never
+    - when: on_success
+  hooks:
+    pre_get_sources_script:
+      - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/Mellanox/spdk_team/dpdk.git".insteadOf https://github.com/spdk/dpdk.git
+  script:
+    - patch -p1 < $HOME/spdk-test-nvme.diff
+    - patch -p1 < $HOME/spdk-autotest-on-vm.diff
+    - tar xf .test.tar
+    # clean up output of autotest from previous runs
+    - sudo rm -rf $CI_PROJECT_DIR/../output/
+    - sudo ./test/unit/unittest.sh
+    - sudo ./autotest.sh $HOME/autorun-spdk.conf
+    - sudo chown -R $USER $CI_PROJECT_DIR
 
 coverity-job:
-    stage: build
-    rules:
-        - changes:
-            - .ci/
-            - packaging/
-            - go/
-            - rpmbuild/
-          when: never
-        - when: on_success
-    tags: [ k8s, mtr, linux, x86_64 ]
-    image: "$COV_IMAGE"
-    script:
-        - apt update
-        - ./scripts/pkgdep.sh
-        - ./configure --with-rdma=mlx5_dv --disable-unit-tests
-        - cov-build --dir cov_build make -j 4
-        - cov-analyze --jobs auto --security --concurrency --dir cov_build
-        - cov-format-errors --dir cov_build --html-output cov_build/html
-        - nr=$(cov-format-errors --dir cov_build |& awk '/Processing [0-9]+ errors?/ { print $2 }')
-        - exit $nr
-    variables:
-        GIT_SUBMODULE_STRATEGY: recursive
-        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/cov/bin
-        CC: gcc-9
-    allow_failure: true
-    artifacts:
-        name: coverity
-        paths:
-            - cov_build/html/
-        expire_in: 1 week
-        when: always
+  extends: .do_build
+  stage: build
+  image: "$COV_IMAGE"
+  script:
+    - apt-get -q update
+    - ./scripts/pkgdep.sh
+    - ./configure --with-rdma=mlx5_dv --disable-unit-tests
+    - cov-build --dir cov_build make -j 4
+    - cov-analyze --jobs auto --security --concurrency --dir cov_build
+    - cov-format-errors --dir cov_build --html-output cov_build/html
+    - nr=$(cov-format-errors --dir cov_build |& awk '/Processing [0-9]+ errors?/ { print $2 }')
+    - exit $nr
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/cov/bin
+    CC: gcc-9
+  allow_failure: true
+  artifacts:
+    name: coverity
+    paths:
+      - cov_build/html/
+    expire_in: 1 week
+    when: always
 
 code-style-job:
-    stage: build
-    rules:
-        - changes:
-            - .ci/
-            - packaging/
-            - go/
-            - rpmbuild/
-          when: never
-        - when: on_success
-    tags: [ k8s, mtr, linux, x86_64 ]
-    image: "$COV_IMAGE"
-    script:
-        - apt update
-        - ./scripts/pkgdep.sh --developer-tools
-        - ./scripts/check_format.sh
-    allow_failure: true
+  extends: .do_build
+  stage: build
+  image: "$COV_IMAGE"
+  script:
+    - apt-get -q update
+    - ./scripts/pkgdep.sh --developer-tools
+    - ./scripts/check_format.sh
+  allow_failure: true
