@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 #  SPDX-License-Identifier: BSD-3-Clause
 #  Copyright (C) 2018 Intel Corporation
+#  Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
 #  All rights reserved.
 #
 
@@ -44,6 +45,7 @@ def filter_methods(do_remove_global_rpcs):
         'accel_crypto_key_create',
         'accel_assign_opc',
         'accel_set_options',
+        'mlx5_scan_accel_module',
         'dpdk_cryptodev_scan_accel_module',
         'dpdk_cryptodev_set_driver',
         'virtio_blk_create_transport',

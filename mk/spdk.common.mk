@@ -160,6 +160,9 @@ endif
 
 ifeq ($(CONFIG_RDMA),y)
 SYS_LIBS += -libverbs -lrdmacm
+ifeq ($(CONFIG_RDMA_PROV),mlx5_dv)
+SYS_LIBS += -lmlx5
+endif
 endif
 
 ifeq ($(CONFIG_URING),y)
