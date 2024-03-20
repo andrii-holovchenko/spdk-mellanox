@@ -36,7 +36,7 @@ build-job:
     - cd ../fio-fio-3.35
     - ./configure --prefix=/usr/local
     - cd $CI_PROJECT_DIR
-    - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --target-arch=znver3 --enable-debug
+    - ./configure --with-fio=../fio-fio-3.35/ --with-rdma=mlx5_dv --target-arch=znver3 --with-crypto --enable-debug
     - make -j4
     - find test -type f -perm 0755 |egrep -v '\.sh|\.py|\.pl|\/match' |tar cf .test.tar -T /dev/stdin
   artifacts:
@@ -47,6 +47,7 @@ build-job:
       - .test.tar
       - ./mk/config.mk
       - ./mk/cc.mk
+      - ./include/spdk/config.h
 
 test-job:
   stage: test
@@ -71,6 +72,10 @@ test-job:
     # clean up output of autotest from previous runs
     - sudo rm -rf $CI_PROJECT_DIR/../output/
     - sudo ./test/unit/unittest.sh
+    - sudo ./scripts/setup.sh
+    - sudo ./test/accel/accel_mlx5.sh
+    # TODO: enable once crypto NIC is available
+    # sudo ./test/accel/accel_mlx5_crypto.sh
     - sudo ./autotest.sh $HOME/autorun-spdk.conf
     - sudo chown -R $USER $CI_PROJECT_DIR
 
