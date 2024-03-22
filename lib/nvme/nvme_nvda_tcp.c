@@ -3587,7 +3587,7 @@ nvme_tcp_pdu_ch_handle(struct nvme_tcp_qpair *tqpair)
 			break;
 		case SPDK_NVME_TCP_PDU_TYPE_C2H_TERM_REQ:
 			expected_hlen = sizeof(struct spdk_nvme_tcp_term_req_hdr);
-			if (spdk_unlikely((pdu->hdr.common.plen <= expected_hlen) ||
+			if (spdk_unlikely((pdu->hdr.common.plen < expected_hlen) ||
 					  (pdu->hdr.common.plen > SPDK_NVME_TCP_TERM_REQ_PDU_MAX_SIZE))) {
 				plen_error = true;
 			}
@@ -3674,6 +3674,7 @@ nvme_tcp_c2h_data_payload_handle(struct nvme_tcp_qpair *tqpair,
 }
 
 static const char *spdk_nvme_tcp_term_req_fes_str[] = {
+	"Reserved",
 	"Invalid PDU Header Field",
 	"PDU Sequence Error",
 	"Header Digest Error",
@@ -3700,6 +3701,7 @@ nvme_tcp_c2h_term_req_payload_handle(struct nvme_tcp_qpair *tqpair,
 				     struct nvme_tcp_pdu *pdu)
 {
 	nvme_tcp_c2h_term_req_dump(&tqpair->ctrl_hdr.term_req);
+	nvme_tcp_qpair_abort_reqs(&tqpair->qpair, 0);
 	nvme_tcp_qpair_set_recv_state(tqpair, NVME_TCP_PDU_RECV_STATE_QUIESCING);
 }
 
@@ -4170,7 +4172,12 @@ nvme_tcp_c2h_term_req_hdr_handle(struct nvme_tcp_qpair *tqpair,
 	pdu->data_len = pdu->iovs[0].iov_len;
 	pdu->iovcnt = pdu->data_iovcnt;
 
-	nvme_tcp_qpair_set_recv_state(tqpair, NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_PAYLOAD);
+	if (pdu->data_len) {
+		nvme_tcp_qpair_set_recv_state(tqpair, NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_PAYLOAD);
+	} else {
+		nvme_tcp_c2h_term_req_payload_handle(tqpair, pdu);
+	}
+
 	return;
 end:
 	nvme_tcp_qpair_send_h2c_term_req(tqpair, pdu, fes, error_offset);
