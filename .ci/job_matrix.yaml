@@ -20,6 +20,7 @@ kubernetes:
 
 volumes:
   - {mountPath: /auto/mtrswgwork, hostPath: /auto/mtrswgwork}
+  - {mountPath: /auto/sw/work, hostPath: /auto/sw/work}
 
 runs_on_dockers:
   - {file: '.ci/Dockerfile.ubuntu20.04', name: 'ubuntu2004ofed59', arch: 'x86_64', tag: '5.9-0.1.9.0'}
