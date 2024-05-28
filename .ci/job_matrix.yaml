@@ -34,6 +34,7 @@ runs_on_dockers:
   - {file: '.ci/Dockerfile.centos7.9.2009', name: 'centos7_9', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
   - {file: '.ci/Dockerfile.centos8', name: 'centos8_stream', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
   - {file: '.ci/Dockerfile.openeuler.20.03', name: 'openeuler20_03', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
+  - {file: '.ci/Dockerfile.rockylinux9.2', name: 'rockylinux9_2', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
 #  - {file: '.ci/Dockerfile.ubuntu20.04', name: 'ubuntu20_04', arch: 'x86_64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
 #  - {file: '.ci/Dockerfile.ubuntu22.04', name: 'ubuntu22_04', arch: 'x86_64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
 #  - {file: '.ci/Dockerfile.centos7.9.2009', name: 'centos7_9', arch: 'x86_64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
@@ -69,6 +70,7 @@ steps:
       - "{name: 'centos7_9', variant:1}"
       - "{name: 'centos8_stream', variant:1}"
       - "{name: 'openeuler20_03', variant:1}"
+      - "{name: 'rockylinux9_2', variant:1}"
     run: |
       .ci/upload.sh nexus
 
@@ -82,6 +84,7 @@ steps:
       - "{name: 'centos7_9', variant:1}"
       - "{name: 'centos8_stream', variant:1}"
       - "{name: 'openeuler20_03', variant:1}"
+      - "{name: 'rockylinux9_2', variant:1}"
     run: |
       .ci/upload.sh urm
 

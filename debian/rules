@@ -59,8 +59,6 @@ override_dh_auto_install:
 	install -p -m 755 build/examples/identify debian/tmp/usr/sbin/nvme-identify
 	install -p -m 755 build/examples/nvme_manage debian/tmp/usr/sbin/
 	install -p -m 755 build/examples/blobcli debian/tmp/usr/sbin/
-	install -p -m 755 contrib/setup_nvmf_tgt.py debian/tmp/usr/sbin
-	install -p -m 755 contrib/setup_vhost.py debian/tmp/usr/sbin
 	install -p -m 755 contrib/vhost_add_config.sh debian/tmp/usr/sbin
 	install -p -m 755 contrib/setup_hugepages.sh debian/tmp/usr/sbin
 	install -m 644 contrib/spdk_tgt.service debian/tmp$(SYSTEMD_DIR)/

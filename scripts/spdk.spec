@@ -30,6 +30,10 @@ Source0:        spdk-%{version}.tar.gz
 # So, let's switch to Python36 from IUS repo - https://github.com/iusrepo/python36
 %define use_python python3.6
 %define python_ver 3.6
+%if 0%{?rhel} >= 9
+%define use_python python3.9
+%define python_ver 3.9
+%endif
 %endif
 
 %if %{defined ctyunos}
@@ -82,7 +86,10 @@ BuildRequires:	libibverbs-devel, librdmacm-devel
 Requires:	libibverbs
 Requires:	librdmacm 
 Requires:	sg3_utils
-Requires:   libhugetlbfs-utils
+# RHEL >= 9 doesn't have libhugetlbfs-utils
+%if ! 0%{?rhel} >= 9
+Requires:       libhugetlbfs-utils
+%endif
 %if "%{use_python}" == "python3.6"
 Requires: %{name}%{?_isa} = %{package_version} python36
 %else
@@ -147,8 +154,6 @@ install -p -m 755 build/examples/perf %{install_sbindir}/nvme-perf
 install -p -m 755 build/examples/identify %{install_sbindir}/nvme-identify
 install -p -m 755 build/examples/nvme_manage %{install_sbindir}/
 install -p -m 755 build/examples/blobcli %{install_sbindir}/
-install -p -m 755 contrib/setup_nvmf_tgt.py %{install_sbindir}
-install -p -m 755 contrib/setup_vhost.py %{install_sbindir}
 install -p -m 755 contrib/vhost_add_config.sh %{install_sbindir}
 install -p -m 755 contrib/setup_hugepages.sh %{install_sbindir}
 systemd_dir=${RPM_BUILD_ROOT}%{_prefix}/lib/systemd/system
