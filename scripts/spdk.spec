@@ -133,7 +133,8 @@ export LDFLAGS
         --with-rdma=mlx5_dv \
         --without-vtune \
         --with-shared \
-        --with-raid5f
+        --with-raid5f \
+        --with-aio-fsdev
 
 # SPDK make
 make %{?_smp_mflags}
