@@ -9,7 +9,7 @@ registry_host: harbor.mellanox.com
 registry_path: /swx-storage/spdk
 
 credentials:
-  - {credentialsId: 'svc-nbu-swx-snap', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
+  - {credentialsId: 'svc-nbu-swx-repos', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
 
 failFast: false
 kubernetes:
@@ -64,7 +64,7 @@ steps:
 
   - name: Upload distro package URM
     enable: true
-    credentialsId: 'svc-nbu-swx-snap'
+    credentialsId: 'svc-nbu-swx-repos'
     resource: actions/nexus.py
     containerSelector:
       - "{name: 'ubuntu20_04', variant:1}"
