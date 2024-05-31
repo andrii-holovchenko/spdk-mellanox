@@ -52,9 +52,9 @@
       scm:
         - git:
             url: "{jjb_git}"
+            credentials-id: 'mellanox-github-id-rsa'
             branches:
               - 'origin/{git_branch}'
-
       script-path: "$script"
 
 - project:
