@@ -10,9 +10,13 @@ get_releasever() {
       if [ -f /etc/os-release ]; then
           source /etc/os-release
           if [ $ID == "openEuler" ]; then
-            # 20.03
+              # 20.03
               if [ $VERSION_ID == "20.03" ]; then
                   releasever="openEuler-20.03"
+              fi
+	      # 22.03
+	      if [ $VERSION_ID == "22.03" ]; then
+                  releasever="openEuler-22.03"
               fi
           fi
       fi

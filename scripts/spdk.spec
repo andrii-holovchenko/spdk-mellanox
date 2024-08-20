@@ -40,6 +40,10 @@ Source0:        spdk-%{version}.tar.gz
 %define python_ver 3.9
 %endif
 
+%if %{defined python3_version}
+%define python_ver %{python3_version}
+%endif
+
 %ifarch x86_64
 BuildRequires:  clang-analyzer
 %endif
