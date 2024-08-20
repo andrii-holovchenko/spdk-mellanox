@@ -7,6 +7,9 @@ ARG MOFED_VER
 ENV LANG=en_US.utf-8
 USER root
 
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*; \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+
 RUN yum install -y ca-certificates
 
 RUN yum install -y \
