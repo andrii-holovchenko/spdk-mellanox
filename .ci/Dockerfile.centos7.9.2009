@@ -40,6 +40,7 @@ RUN yum install -y \
     lcov \
     gcc-c++ \
     python36 \
+    python36-requests \
     python3-pip \
     devtoolset-8-gcc \
     devtoolset-8-gcc-c++ \

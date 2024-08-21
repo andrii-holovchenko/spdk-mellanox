@@ -233,7 +233,6 @@ elif [[ -f /etc/redhat-release || -f /etc/openEuler-release ]]; then
         upload_rpm_urm
     elif [ $1 == "nexus" ]; then
         repo_name="${repo_name}-yum"
-        sudo yum install python3-requests -y || sudo yum install python36-requests -y
         # Create YUM repository
         ${bd}/actions/nexus.py yum --name ${repo_name} \
             --url ${REPO_URL} --user ${REPO_USER} \
