@@ -61,21 +61,6 @@ steps:
         exit 1
       fi
 
-  - name: Upload distro package NEXUS
-    enable: true
-    credentialsId: '311997c9-cc1c-4d5d-8ba2-6eb43ba0a06d'
-    resource: actions/nexus.py
-    containerSelector:
-      - "{name: 'ubuntu20_04', variant:1}"
-      - "{name: 'ubuntu22_04', variant:1}"
-      - "{name: 'centos7_9', variant:1}"
-      - "{name: 'centos8_stream', variant:1}"
-      - "{name: 'openeuler20_03', variant:1}"
-      - "{name: 'openeuler22_03', variant:1}"
-      - "{name: 'rockylinux9_2', variant:1}"
-    run: |
-      .ci/upload.sh nexus
-
   - name: Upload distro package URM
     enable: true
     credentialsId: '3a89fb85-f7aa-40f2-bd7a-32be80588d95'
