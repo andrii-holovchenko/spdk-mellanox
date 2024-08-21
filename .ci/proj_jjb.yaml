@@ -28,10 +28,6 @@
             default: false
             description: "Release packages"
         - string:
-            name: "release_dir"
-            default: "/auto/sw/work/swx_devops/{jjb_proj}"
-            description: "Location to release rpm to"
-        - string:
             name: "script"
             default: "{jjb_jenkinsfile}"
             description: "Jenkinsfile to load on trigger"
@@ -41,7 +37,7 @@
             description: "Repository manager URL"
         - string:
             name: "GPG_KEY_PATH"
-            default: "/auto/sw/work/swx_devops/swx-debs-keyring/mellanox-debs-keyring.key"
+            default: "/mnt/secret/mellanox-debs-keyring.key"
             description: "GPG key file location"
         - string:
             name: "DEBUG"
@@ -51,6 +47,7 @@
       scm:
         - git:
             url: "{jjb_git}"
+            credentials-id: 'mellanox-github-id-rsa'
             branches:
               - 'origin/{git_branch}'
 

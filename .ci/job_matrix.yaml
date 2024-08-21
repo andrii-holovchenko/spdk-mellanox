@@ -2,31 +2,27 @@ job: spdk
 
 registry_host: harbor.mellanox.com
 registry_path: /swx-storage/spdk
-registry_auth: swx-storage
 
 credentials:
-  - {credentialsId: '311997c9-cc1c-4d5d-8ba2-6eb43ba0a06d', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
-  - {credentialsId: '3a89fb85-f7aa-40f2-bd7a-32be80588d95', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
+  - {credentialsId: 'svc-nbu-swx-repos', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
 
 failFast: false
 kubernetes:
-  cloud: swx-k8s-spray
-  namespace: snap-ci
+  cloud: il-ipp-blossom-prod
+  namespace: nbu-swx-storage-devops
   runAsUser: "6213"
   runAsGroup: "11429"
   privileged: true
-  arch_table:
-    aarch64:
-      nodeSelector: 'feature.node.kubernetes.io/cpu-vendor=ARM'
-    x86_64:
-      nodeSelector: 'feature.node.kubernetes.io/cpu-vendor=AuthenticAMD'
-
-volumes:
-  - {mountPath: /auto/mtrswgwork, hostPath: /auto/mtrswgwork}
-  - {mountPath: /auto/sw/work, hostPath: /auto/sw/work}
 
 env:
   MOFED_VER: 23.07-0.5.0.0
+  REGISTRY_AUTH_FILE: '/mnt/secret_podman/config_podman.json'
+  GIT_SSH_COMMAND: 'ssh -o StrictHostKeyChecking=no'
+
+secret_volumes:
+  - {secretName: 'mellanox-debs-keyring', mountPath: '/mnt/secret'}
+  - {secretName: 'registry-auth-file', mountPath: '/mnt/secret_podman'}
+  - {secretName: 'mellanox-github-rsa', mountPath: '/var/home/swx-jenkins/.ssh'}
 
 runs_on_dockers:
   - {file: '.ci/Dockerfile.ubuntu20.04', name: 'ubuntu20_04', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
@@ -34,13 +30,8 @@ runs_on_dockers:
   - {file: '.ci/Dockerfile.centos7.9.2009', name: 'centos7_9', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
   - {file: '.ci/Dockerfile.centos8', name: 'centos8_stream', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
   - {file: '.ci/Dockerfile.openeuler.20.03', name: 'openeuler20_03', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
-  - {file: '.ci/Dockerfile.rockylinux9.2', name: 'rockylinux9_2', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
   - {file: '.ci/Dockerfile.openeuler.22.03', name: 'openeuler22_03', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
-#  - {file: '.ci/Dockerfile.ubuntu20.04', name: 'ubuntu20_04', arch: 'x86_64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
-#  - {file: '.ci/Dockerfile.ubuntu22.04', name: 'ubuntu22_04', arch: 'x86_64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
-#  - {file: '.ci/Dockerfile.centos7.9.2009', name: 'centos7_9', arch: 'x86_64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
-#  - {file: '.ci/Dockerfile.centos8', name: 'centos8_stream', arch: 'x86_64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
-
+  - {file: '.ci/Dockerfile.rockylinux9.2', name: 'rockylinux9_2', arch: 'aarch64', build_args: '--build-arg MOFED_VER=$MOFED_VER', tag: '$MOFED_VER'}
 
 steps:
   - name: Set correct rights
@@ -63,8 +54,7 @@ steps:
 
   - name: Upload distro package URM
     enable: true
-    credentialsId: '3a89fb85-f7aa-40f2-bd7a-32be80588d95'
-    resource: actions/nexus.py
+    credentialsId: 'svc-nbu-swx-repos'
     containerSelector:
       - "{name: 'ubuntu20_04', variant:1}"
       - "{name: 'ubuntu22_04', variant:1}"
@@ -77,6 +67,8 @@ steps:
       .ci/upload.sh urm
 
 pipeline_stop:
+  containerSelector:
+      - "{name: 'ubuntu22_04'}"
   run: |
     if [[ ! -n "$ghprbPullId" && "$pipeline_status" == "SUCCESS" ]]; then
       .ci/git_tag.sh
