@@ -1,4 +1,4 @@
-FROM centos:7.9.2009
+FROM dockerhub.nvidia.com/centos:7.9.2009
 ARG _UID=6213
 ARG _GID=11429
 ARG _LOGIN=swx-jenkins
@@ -8,11 +8,17 @@ ENV LANG=en_US.utf-8
 ENV PATH=/opt/rh/devtoolset-8/root/usr/bin:$PATH
 USER root
 
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*; \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+
 RUN yum install -y ca-certificates
 
 RUN yum install -y \
     epel-release \
     centos-release-scl
+
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-SCLo-*.repo; \
+    sed -i 's|# *baseurl=http://mirror.centos.org/centos/7/sclo|baseurl=https://mirror.nsc.liu.se/centos-store/altarch/7/sclo|g' /etc/yum.repos.d/CentOS-SCLo-*.repo
 
 RUN yum install -y \
     sudo \

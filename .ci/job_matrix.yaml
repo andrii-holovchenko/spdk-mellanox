@@ -2,37 +2,33 @@ job: spdk
 
 registry_host: harbor.mellanox.com
 registry_path: /swx-storage/spdk
-registry_auth: swx-storage
 
 credentials:
-  - {credentialsId: '311997c9-cc1c-4d5d-8ba2-6eb43ba0a06d', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
-  - {credentialsId: '3a89fb85-f7aa-40f2-bd7a-32be80588d95', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
+  - {credentialsId: 'svc-nbu-swx-repos', usernameVariable: 'REPO_USER', passwordVariable: 'REPO_PASS'}
 
 failFast: false
 kubernetes:
-  cloud: swx-k8s-spray
-  namespace: snap-ci
+  cloud: il-ipp-blossom-prod
+  namespace: nbu-swx-storage-devops
   runAsUser: "6213"
   runAsGroup: "11429"
   privileged: true
-  arch_table:
-    aarch64:
-      nodeSelector: 'feature.node.kubernetes.io/cpu-vendor=ARM'
-    x86_64:
-      nodeSelector: 'feature.node.kubernetes.io/cpu-vendor=AuthenticAMD'
 
-volumes:
-  - {mountPath: /auto/mtrswgwork, hostPath: /auto/mtrswgwork}
-  - {mountPath: /auto/sw/work, hostPath: /auto/sw/work}
+env:
+  REGISTRY_AUTH_FILE: '/mnt/secret_podman/config_podman.json'
+  GIT_SSH_COMMAND: 'ssh -o StrictHostKeyChecking=no'
+
+secret_volumes:
+  - {secretName: 'mellanox-debs-keyring', mountPath: '/mnt/secret'}
+  - {secretName: 'registry-auth-file', mountPath: '/mnt/secret_podman'}
+  - {secretName: 'mellanox-github-rsa', mountPath: '/var/home/swx-jenkins/.ssh'}
 
 runs_on_dockers:
   - {file: '.ci/Dockerfile.ubuntu20.04', name: 'ubuntu2004ofed59', arch: 'x86_64', tag: '5.9-0.1.9.0'}
   - {file: '.ci/Dockerfile.ubuntu20.04', name: 'ubuntu2004ofed59', arch: 'aarch64', tag: '5.9-0.1.9.0'}
   - {file: '.ci/Dockerfile.ubuntu22.04', name: 'ubuntu2204ofed59', arch: 'x86_64', tag: '5.9-0.1.9.0'}
   - {file: '.ci/Dockerfile.ubuntu22.04', name: 'ubuntu2204ofed59', arch: 'aarch64', tag: '5.9-0.1.9.0'}
-  - {file: '.ci/Dockerfile.centos7.9.2009', name: 'centos79ofed59', arch: 'x86_64', tag: '5.9-0.1.9.0'}
   - {file: '.ci/Dockerfile.centos7.9.2009', name: 'centos79ofed59', arch: 'aarch64', tag: '5.9-0.1.9.0'}
-  - {file: '.ci/Dockerfile.centos8.2.2004', name: 'centos82ofed59', arch: 'x86_64', tag: '5.9-0.1.9.0'}
   - {file: '.ci/Dockerfile.centos8.2.2004', name: 'centos82ofed59', arch: 'aarch64', tag: '5.9-0.1.9.0'}
   - {file: '.ci/Dockerfile.openeuler.20.03', name: 'openeuler2003ofed59', arch: 'aarch64', tag: '5.9-0.1.9.0'}
 
@@ -55,23 +51,9 @@ steps:
         exit 1
       fi
 
-  - name: Upload distro package NEXUS
-    enable: true
-    credentialsId: '311997c9-cc1c-4d5d-8ba2-6eb43ba0a06d'
-    resource: actions/nexus.py
-    containerSelector:
-      - "{name: 'ubuntu2004ofed59', variant:1}"
-      - "{name: 'ubuntu2204ofed59', variant:1}"
-      - "{name: 'centos79ofed59', variant:1}"
-      - "{name: 'centos82ofed59', variant:1}"
-      - "{name: 'openeuler2003ofed59', variant:1}"
-    run: |
-      .ci/upload.sh nexus
-
   - name: Upload distro package URM
     enable: true
-    credentialsId: '3a89fb85-f7aa-40f2-bd7a-32be80588d95'
-    resource: actions/nexus.py
+    credentialsId: 'svc-nbu-swx-repos'
     containerSelector:
       - "{name: 'ubuntu2004ofed59', variant:1}"
       - "{name: 'ubuntu2204ofed59', variant:1}"
@@ -82,6 +64,8 @@ steps:
       .ci/upload.sh urm
 
 pipeline_stop:
+  containerSelector:
+      - "{name: 'ubuntu2204ofed59'}"
   run: |
     if [[ ! -n "$ghprbPullId" && "$pipeline_status" == "SUCCESS" ]]; then
       .ci/git_tag.sh
