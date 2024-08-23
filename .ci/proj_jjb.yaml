@@ -62,7 +62,7 @@
     jjb_email: 'andiih@nvidia.com'
     jjb_proj: 'spdk'
     git_branch:
-      - v24.01.2.nvda:
+      - v24.01.3.nvda:
           conf_file: '.ci/job_matrix.yaml'
     jjb_git: 'git@github.com:Mellanox/spdk.git'
     jjb_owner: 'andriih@nvidia.com'
