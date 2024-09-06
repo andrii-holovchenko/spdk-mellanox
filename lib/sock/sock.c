@@ -764,36 +764,44 @@ spdk_sock_readv(struct spdk_sock *sock, struct iovec *iov, int iovcnt)
 	return sock->net_impl->readv(sock, iov, iovcnt);
 }
 
-ssize_t
-spdk_sock_recv_zcopy(struct spdk_sock *sock, size_t len, struct spdk_sock_buf **sock_buf)
+int
+spdk_sock_recv_next(struct spdk_sock *sock, void **buf, struct spdk_sock_buf_token **token)
 {
 	if (sock == NULL || sock->flags.closed) {
 		errno = EBADF;
 		return -1;
 	}
 
-	if (!sock->net_impl->recv_zcopy) {
+	if (!sock->net_impl->recv_next) {
 		errno = ENOTSUP;
 		return -1;
 	}
 
-	return sock->net_impl->recv_zcopy(sock, len, sock_buf);
+	return sock->net_impl->recv_next(sock, buf, token);
 }
 
 int
-spdk_sock_free_bufs(struct spdk_sock *sock, struct spdk_sock_buf *sock_buf)
+spdk_sock_release_buf(struct spdk_sock *sock, void *buf, struct spdk_sock_buf_token *token)
 {
+	struct spdk_sock_group_impl *group_impl = NULL;
+
 	if (sock == NULL) {
 		errno = EBADF;
 		return -1;
 	}
 
-	if (!sock->net_impl->free_bufs) {
+	if (!sock->net_impl->group_impl_release_buf) {
 		errno = ENOTSUP;
 		return -1;
 	}
 
-	return sock->net_impl->free_bufs(sock, sock_buf);
+	group_impl = sock->group_impl;
+	if (group_impl == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return group_impl->net_impl->group_impl_release_buf(group_impl, buf, token);
 }
 
 ssize_t
@@ -1102,6 +1110,7 @@ spdk_sock_group_close(struct spdk_sock_group **group)
 	}
 
 	STAILQ_FOREACH_SAFE(group_impl, &(*group)->group_impls, link, tmp) {
+		STAILQ_REMOVE_HEAD(&(*group)->group_impls, link);
 		if (fgrp != NULL) {
 			fd = group_impl->net_impl->group_impl_get_interruptfd(group_impl);
 			if (fd >= 0) {

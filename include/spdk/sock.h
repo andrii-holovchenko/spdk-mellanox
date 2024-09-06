@@ -509,6 +509,39 @@ void spdk_sock_writev_async(struct spdk_sock *sock, struct spdk_sock_request *re
  */
 ssize_t spdk_sock_readv(struct spdk_sock *sock, struct iovec *iov, int iovcnt);
 
+struct spdk_sock_buf_token;
+
+/**
+ * Receive the next portion of the stream from the socket.
+ *
+ * The buffer pointed to by `buf` must later be returned by calling
+ * `spdk_sock_release_buf()`.
+ *
+ * Note that the amount of data in buf is determined entirely by
+ * the sock layer. You cannot request to receive only a limited
+ * amount here. You simply get whatever the next portion of the stream
+ * is, as determined by the sock module.
+ *
+ * \param sock Socket to receive from.
+ * \param buf Populated with the next portion of the stream
+ * \param token Populated with the token for the buffer
+
+ * \return On success, the length of the buffer placed into buf, On failure, -1 with errno set.
+ */
+int spdk_sock_recv_next(struct spdk_sock *sock, void **buf, struct spdk_sock_buf_token **token);
+
+/**
+ * Releases a buffer to be used again in the receive pool.
+ * See spdk_sock_recv_next() for more details.
+ *
+ * \param sock Socket.
+ * \param buf Pointer the buffer.
+ * \param token Token for the buffer
+
+ * \return 0 on success, -1 on failure.
+ */
+int spdk_sock_release_buf(struct spdk_sock *sock, void *buf, struct spdk_sock_buf_token *token);
+
 /**
  * Set the value used to specify the low water mark (in bytes) for this socket.
  *

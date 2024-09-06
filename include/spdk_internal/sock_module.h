@@ -88,6 +88,7 @@ struct spdk_net_impl {
 	ssize_t (*readv)(struct spdk_sock *sock, struct iovec *iov, int iovcnt);
 	ssize_t (*writev)(struct spdk_sock *sock, struct iovec *iov, int iovcnt);
 
+	int (*recv_next)(struct spdk_sock *sock, void **buf, struct spdk_sock_buf_token **token);
 	void (*writev_async)(struct spdk_sock *sock, struct spdk_sock_request *req);
 	void (*readv_async)(struct spdk_sock *sock, struct spdk_sock_request *req);
 	int (*flush)(struct spdk_sock *sock);
@@ -109,6 +110,8 @@ struct spdk_net_impl {
 			       struct spdk_sock **socks);
 	int (*group_impl_get_interruptfd)(struct spdk_sock_group_impl *group);
 	int (*group_impl_close)(struct spdk_sock_group_impl *group);
+	int (*group_impl_release_buf)(struct spdk_sock_group_impl *group, void *buf,
+				      struct spdk_sock_buf_token *token);
 
 	int (*get_opts)(struct spdk_sock_impl_opts *opts, size_t *len);
 	int (*set_opts)(const struct spdk_sock_impl_opts *opts, size_t len);
@@ -117,8 +120,6 @@ struct spdk_net_impl {
 
 	STAILQ_ENTRY(spdk_net_impl) link;
 
-	ssize_t (*recv_zcopy)(struct spdk_sock *sock, size_t len, struct spdk_sock_buf **sock_buf);
-	int (*free_bufs)(struct spdk_sock *sock, struct spdk_sock_buf *sock_buf);
 	int (*init)(void);
 	void (*deinit)(void);
 };
