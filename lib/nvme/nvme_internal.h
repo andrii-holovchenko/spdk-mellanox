@@ -522,7 +522,7 @@ struct spdk_nvme_qpair {
 	uint8_t					transport_failure_reason: 2;
 	uint8_t					last_transport_failure_reason: 2;
 
-	uint8_t					dnr: 1;
+	uint8_t					abort_dnr: 1;
 	/* The user is destroying qpair */
 	uint8_t					destroy_in_progress: 1;
 

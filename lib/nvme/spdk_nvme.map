@@ -187,7 +187,7 @@
 	spdk_nvme_qpair_print_completion;
 	spdk_nvme_qpair_get_id;
 	spdk_nvme_qpair_get_num_outstanding_reqs;
-	spdk_nvme_qpair_set_dnr;
+	spdk_nvme_qpair_set_abort_dnr;
 	spdk_nvme_qpair_is_connected;
 
 	spdk_nvme_print_command;

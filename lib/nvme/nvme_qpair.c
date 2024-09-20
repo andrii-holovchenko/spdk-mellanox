@@ -580,7 +580,7 @@ nvme_qpair_abort_queued_reqs(struct spdk_nvme_qpair *qpair)
 			SPDK_ERRLOG("aborting queued i/o\n");
 		}
 		nvme_qpair_manual_complete_request(qpair, req, SPDK_NVME_SCT_GENERIC,
-						   SPDK_NVME_SC_ABORTED_SQ_DELETION, qpair->dnr, true);
+						   SPDK_NVME_SC_ABORTED_SQ_DELETION, qpair->abort_dnr, true);
 	}
 }
 
@@ -783,7 +783,7 @@ spdk_nvme_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
 				STAILQ_REMOVE(&qpair->err_req_head, req, nvme_request, stailq);
 				nvme_qpair_manual_complete_request(qpair, req,
 								   req->cpl.status.sct,
-								   req->cpl.status.sc, qpair->dnr, true);
+								   req->cpl.status.sc, qpair->abort_dnr, true);
 			}
 		}
 	}
@@ -833,11 +833,9 @@ spdk_nvme_qpair_get_failure_reason(struct spdk_nvme_qpair *qpair)
 }
 
 void
-spdk_nvme_qpair_set_dnr(struct spdk_nvme_qpair *qpair, uint8_t dnr)
+spdk_nvme_qpair_set_abort_dnr(struct spdk_nvme_qpair *qpair, bool dnr)
 {
-	assert(dnr <= 1);
-
-	qpair->dnr = dnr;
+	qpair->abort_dnr = dnr ? 1 : 0;
 }
 
 bool
@@ -921,7 +919,7 @@ nvme_qpair_complete_error_reqs(struct spdk_nvme_qpair *qpair)
 		STAILQ_REMOVE_HEAD(&qpair->err_req_head, stailq);
 		nvme_qpair_manual_complete_request(qpair, req,
 						   req->cpl.status.sct,
-						   req->cpl.status.sc, qpair->dnr, true);
+						   req->cpl.status.sc, qpair->abort_dnr, true);
 	}
 }
 

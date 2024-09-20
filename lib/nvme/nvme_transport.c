@@ -579,11 +579,11 @@ nvme_transport_qpair_abort_reqs(struct spdk_nvme_qpair *qpair)
 	const struct spdk_nvme_transport *transport;
 
 	if (spdk_likely(!nvme_qpair_is_admin_queue(qpair))) {
-		qpair->transport->ops.qpair_abort_reqs(qpair, qpair->dnr);
+		qpair->transport->ops.qpair_abort_reqs(qpair, qpair->abort_dnr);
 	} else {
 		transport = nvme_get_transport(qpair->ctrlr->trid.trstring);
 		assert(transport != NULL);
-		transport->ops.qpair_abort_reqs(qpair, qpair->dnr);
+		transport->ops.qpair_abort_reqs(qpair, qpair->abort_dnr);
 	}
 }
 

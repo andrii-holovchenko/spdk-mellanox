@@ -2027,7 +2027,7 @@ bdev_nvme_reset_destroy_qpair(struct spdk_io_channel_iter *i)
 
 	if (nvme_qpair->qpair != NULL) {
 		if (nvme_qpair->ctrlr->dont_retry) {
-			spdk_nvme_qpair_set_dnr(nvme_qpair->qpair, 1);
+			spdk_nvme_qpair_set_abort_dnr(nvme_qpair->qpair, true);
 		}
 		spdk_nvme_ctrlr_disconnect_io_qpair(nvme_qpair->qpair);
 
