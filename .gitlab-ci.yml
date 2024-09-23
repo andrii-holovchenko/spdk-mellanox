@@ -22,7 +22,7 @@ unittests-build-job:
   stage: pre-test
   image: "$FEDORA_IMAGE"
   variables:
-    XLIO_SHA: 3.51.1
+    XLIO_SHA: 3.60.0
   parallel:
     matrix:
       - BUILD_TYPE: verbs-debug

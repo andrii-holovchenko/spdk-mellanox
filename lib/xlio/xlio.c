@@ -15,6 +15,10 @@ static void *g_xlio_handle;
 #endif
 static bool g_xlio_is_initialized = false;
 
+int (*g_xlio_getsockopt)(int sockfd, int level, int optname, void *restrict optval,
+			 socklen_t *restrict optlen);
+
+
 #ifndef SPDK_CONFIG_STATIC_XLIO
 static int
 xlio_load(const char *xlio_path)
@@ -26,36 +30,14 @@ xlio_load(const char *xlio_path)
 		return -1;
 	}
 
-#define GET_SYM(sym) \
-	g_xlio_ops.sym = dlsym(g_xlio_handle, #sym); \
-	if (!g_xlio_ops.sym) { \
-		SPDK_ERRLOG("Failed to find symbol '%s'in XLIO library\n", #sym); \
-		dlclose(g_xlio_handle); \
-		g_xlio_handle = NULL; \
-		return -1; \
+	g_xlio_getsockopt = dlsym(g_xlio_handle, "getsockopt");
+	if (!g_xlio_getsockopt) {
+		SPDK_ERRLOG("Failed to find getsockopt in XLIO library\n");
+		dlclose(g_xlio_handle);
+		g_xlio_handle = NULL;
+		return -1;
 	}
 
-	GET_SYM(socket);
-	GET_SYM(bind);
-	GET_SYM(listen);
-	GET_SYM(connect);
-	GET_SYM(accept);
-	GET_SYM(close);
-	GET_SYM(readv);
-	GET_SYM(writev);
-	GET_SYM(recv);
-	GET_SYM(recvmsg);
-	GET_SYM(sendmsg);
-	GET_SYM(fcntl);
-	GET_SYM(ioctl);
-	GET_SYM(getsockopt);
-	GET_SYM(setsockopt);
-	GET_SYM(getsockname);
-	GET_SYM(getpeername);
-	GET_SYM(getaddrinfo);
-	GET_SYM(freeaddrinfo);
-	GET_SYM(gai_strerror);
-#undef GET_SYM
 	return 0;
 }
 
@@ -89,7 +71,7 @@ _xlio_get_api(void)
 	struct xlio_api_t *api_ptr = NULL;
 	socklen_t len = sizeof(api_ptr);
 
-	int err = xlio_getsockopt(-2, SOL_SOCKET, SO_XLIO_GET_API, &api_ptr, &len);
+	int err = g_xlio_getsockopt(-2, SOL_SOCKET, SO_XLIO_GET_API, &api_ptr, &len);
 	if (err < 0) {
 		return NULL;
 	}
@@ -168,7 +150,7 @@ spdk_xlio_init(void)
 		return -1;
 	}
 
-	required_caps = XLIO_EXTRA_API_XLIO_SOCKET;
+	required_caps = XLIO_EXTRA_API_XLIO_ULTRA;
 	if ((g_xlio_api->cap_mask & required_caps) != required_caps) {
 		SPDK_ERRLOG("Required XLIO caps are missing: required %" PRIx64 ", got %" PRIx64 "\n",
 			    required_caps, g_xlio_api->cap_mask);
