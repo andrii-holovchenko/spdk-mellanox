@@ -1,4 +1,4 @@
-FROM quay.io/centos/centos:stream8
+FROM urm.nvidia.com/quay-remote/centos/centos:stream8
 ARG _UID=6213
 ARG _GID=11429
 ARG _LOGIN=swx-jenkins

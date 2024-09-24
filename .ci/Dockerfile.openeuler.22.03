@@ -1,4 +1,4 @@
-FROM urm.nvidia.com/docker/openeuler/openeuler:22.03-lts-sp3
+FROM dockerhub.nvidia.com/openeuler/openeuler:22.03-lts-sp3
 ARG _UID=6213
 ARG _GID=11429
 ARG _LOGIN=swx-jenkins
