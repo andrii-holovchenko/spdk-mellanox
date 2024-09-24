@@ -1,4 +1,4 @@
-FROM centos:7.9.2009
+FROM dockerhub.nvidia.com/centos:7.9.2009
 ARG _UID=6213
 ARG _GID=11429
 ARG _LOGIN=swx-jenkins
