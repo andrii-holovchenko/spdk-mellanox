@@ -1727,22 +1727,28 @@ err:
 	return rc;
 }
 
+static void bdev_nvme_reset_io_continue(void *cb_arg, bool success);
+
 static void
 bdev_nvme_complete_pending_resets(struct spdk_io_channel_iter *i)
 {
 	struct spdk_io_channel *_ch = spdk_io_channel_iter_get_channel(i);
 	struct nvme_ctrlr_channel *ctrlr_ch = spdk_io_channel_get_ctx(_ch);
-	enum spdk_bdev_io_status status = SPDK_BDEV_IO_STATUS_SUCCESS;
+	bool success = true;
 	struct spdk_bdev_io *bdev_io;
+	struct nvme_bdev_io *bio;
 
 	if (spdk_io_channel_iter_get_ctx(i) != NULL) {
-		status = SPDK_BDEV_IO_STATUS_FAILED;
+		success = false;
 	}
 
 	while (!TAILQ_EMPTY(&ctrlr_ch->pending_resets)) {
 		bdev_io = TAILQ_FIRST(&ctrlr_ch->pending_resets);
 		TAILQ_REMOVE(&ctrlr_ch->pending_resets, bdev_io, module_link);
-		__bdev_nvme_io_complete(bdev_io, status, NULL);
+
+		bio = (struct nvme_bdev_io *)bdev_io->driver_ctx;
+
+		bdev_nvme_reset_io_continue(bio, success);
 	}
 
 	spdk_for_each_channel_continue(i, 0);
@@ -2309,10 +2315,14 @@ _bdev_nvme_reset_io(struct nvme_io_path *io_path, struct nvme_bdev_io *bio)
 	int rc;
 
 	rc = bdev_nvme_reset(nvme_ctrlr);
-	if (rc == 0) {
-		assert(bio->io_path == NULL);
-		bio->io_path = io_path;
+	if (rc != 0 && rc != -EBUSY) {
+		return rc;
+	}
 
+	assert(bio->io_path == NULL);
+	bio->io_path = io_path;
+
+	if (rc == 0) {
 		assert(nvme_ctrlr->reset_cb_fn == NULL);
 		assert(nvme_ctrlr->reset_cb_arg == NULL);
 		nvme_ctrlr->reset_cb_fn = bdev_nvme_reset_io_continue;
@@ -2327,10 +2337,9 @@ _bdev_nvme_reset_io(struct nvme_io_path *io_path, struct nvme_bdev_io *bio)
 		 */
 		bdev_io = spdk_bdev_io_from_ctx(bio);
 		TAILQ_INSERT_TAIL(&ctrlr_ch->pending_resets, bdev_io, module_link);
-		rc = 0;
 	}
 
-	return rc;
+	return 0;
 }
 
 static void
@@ -2351,8 +2360,7 @@ bdev_nvme_reset_io(struct nvme_bdev_channel *nbdev_ch, struct nvme_bdev_io *bio)
 
 	rc = _bdev_nvme_reset_io(io_path, bio);
 	if (rc != 0) {
-		bio->cpl.cdw0 = 1;
-		bdev_nvme_reset_io_complete(bio);
+		bdev_nvme_reset_io_continue(bio, false);
 	}
 }
 
