@@ -2009,6 +2009,34 @@ bdev_nvme_start_reconnect_delay_timer(struct nvme_ctrlr *nvme_ctrlr)
 					    nvme_ctrlr->opts.reconnect_delay_sec * SPDK_SEC_TO_USEC);
 }
 
+static void _bdev_nvme_reset_complete(struct spdk_io_channel_iter *i, int status);
+
+static void
+bdev_nvme_reset_complete(struct nvme_ctrlr *nvme_ctrlr, bool success)
+{
+	pthread_mutex_lock(&nvme_ctrlr->mutex);
+	if (!success) {
+		if (bdev_nvme_failover_trid(nvme_ctrlr, false, false)) {
+			pthread_mutex_unlock(&nvme_ctrlr->mutex);
+
+			nvme_ctrlr_disconnect(nvme_ctrlr, bdev_nvme_reconnect_ctrlr);
+			return;
+		}
+	} else {
+		assert(nvme_ctrlr->active_path_id != NULL);
+		nvme_ctrlr->active_path_id->is_failed = false;
+	}
+	pthread_mutex_unlock(&nvme_ctrlr->mutex);
+
+	NVME_CTRLR_NOTICELOG(nvme_ctrlr, "Clear pending resets.\n");
+
+	/* Make sure we clear any pending resets before returning. */
+	spdk_for_each_channel(nvme_ctrlr,
+			      bdev_nvme_complete_pending_resets,
+			      success ? NULL : (void *)0x1,
+			      _bdev_nvme_reset_complete);
+}
+
 static void
 _bdev_nvme_reset_complete(struct spdk_io_channel_iter *i, int status)
 {
@@ -2057,32 +2085,6 @@ _bdev_nvme_reset_complete(struct spdk_io_channel_iter *i, int status)
 	default:
 		break;
 	}
-}
-
-static void
-bdev_nvme_reset_complete(struct nvme_ctrlr *nvme_ctrlr, bool success)
-{
-	pthread_mutex_lock(&nvme_ctrlr->mutex);
-	if (!success) {
-		if (bdev_nvme_failover_trid(nvme_ctrlr, false, false)) {
-			pthread_mutex_unlock(&nvme_ctrlr->mutex);
-
-			nvme_ctrlr_disconnect(nvme_ctrlr, bdev_nvme_reconnect_ctrlr);
-			return;
-		}
-	} else {
-		assert(nvme_ctrlr->active_path_id != NULL);
-		nvme_ctrlr->active_path_id->is_failed = false;
-	}
-	pthread_mutex_unlock(&nvme_ctrlr->mutex);
-
-	NVME_CTRLR_NOTICELOG(nvme_ctrlr, "Clear pending resets.\n");
-
-	/* Make sure we clear any pending resets before returning. */
-	spdk_for_each_channel(nvme_ctrlr,
-			      bdev_nvme_complete_pending_resets,
-			      success ? NULL : (void *)0x1,
-			      _bdev_nvme_reset_complete);
 }
 
 static void
