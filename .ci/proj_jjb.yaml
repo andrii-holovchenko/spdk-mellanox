@@ -55,6 +55,10 @@
             credentials-id: 'mellanox-github-id-rsa'
             branches:
               - 'origin/{git_branch}'
+            shallow-clone: true
+            submodule:
+              recursive: true
+              threads: 4
       script-path: "$script"
 
 - project:
