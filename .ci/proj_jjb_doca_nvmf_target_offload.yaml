@@ -68,7 +68,7 @@
 - project:
     name: doca-nvmf-target-offload
     jjb_email: 'andriih@nvidia.com'
-    jjb_git: 'git@gitlab.com:Mellanox/spdk_team/spdk.git'
+    jjb_git: 'git@github.com:Mellanox/spdk.git'
     jjb_owner: 'andriih@nvidia.com'
     jjb_jenkinsfile: '.ci/Jenkinsfile.shlib'
     build_type:
