@@ -11,5 +11,4 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
-export STA_MAX_QPS_NUM="${STA_MAX_QPS_NUM:=400}"
-export STA_BEQ_EU_MASK="${STA_BEQ_EU_MASK:=96}"
+# export STA_BEQ_EU_MASK="${STA_BEQ_EU_MASK:=96}"
