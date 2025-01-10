@@ -242,9 +242,6 @@ CONFIG_FSDEV=y
 # Build with aio fsdev
 CONFIG_AIO_FSDEV=y
 
-# extended file attributes are supported
-CONFIG_HAVE_XATTR=n
-
 # struct stat has st_atime field
 CONFIG_HAVE_STRUCT_STAT_ST_ATIM=n
 
@@ -253,3 +250,6 @@ CONFIG_HAVE_STRUCT_STAT_ST_ATIMESPEC=n
 
 # libc contains the copy_file_range
 CONFIG_COPY_FILE_RANGE=n
+
+# fanotify is supported by the kernel
+CONFIG_HAVE_FANOTIFY=n
