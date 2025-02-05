@@ -35,7 +35,8 @@ RUN apt-get update && \
       python3-pip \
       linux-headers-generic \
       pkg-config nasm \
-      libnuma-dev
+      libnuma-dev \
+      libfuse3-dev
 
 RUN echo "deb [trusted=yes] https://urm.nvidia.com/artifactory/sw-nbu-swx-ci-debian-local focal liburing1" > /etc/apt/sources.list.d/liburing.list && \
     apt update && apt install -y liburing-dev

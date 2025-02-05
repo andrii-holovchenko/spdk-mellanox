@@ -1,7 +1,7 @@
 Source: spdk
 Section: net
 Priority: optional
-Maintainer: Yurii Shestakov <yuriis@mellanox.com>
+Maintainer: Andrii Holovchenko <andriih@nvidia.com>
 Build-Depends: debhelper (>= 10), autotools-dev, dh-python, nasm, pkg-config, autoconf, automake, libtool, liburing-dev, python3-pip
 Standards-Version: 4.1.2
 Homepage: https://spdk.io/

@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 #  SPDX-License-Identifier: BSD-3-Clause
-#  Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES.
+#  Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES.
 #  All rights reserved.
 #
 # See debhelper(7) (uncomment to enable)
@@ -19,6 +19,10 @@ CONF_OPTS += --without-fio --with-vhost --without-rbd --with-rdma=mlx5_dv
 CONF_OPTS += --without-vtune --with-iscsi-initiator --with-shared --without-uring --with-raid5f
 CONF_OPTS += --with-aio-fsdev
 
+ifeq ($(ARCH), aarch64)
+  CONF_OPTS += --target-arch=armv8-a
+endif
+
 ifeq ($(OS), Ubuntu)
   CONF_OPTS += --with-xlio
 endif
@@ -29,14 +33,6 @@ export DEB_LDFLAGS_MAINT_APPEND = -Wl,-rpath,$(pkg_prefix)/lib
 	dh $@
 
 override_dh_auto_configure:
-	# for some reason ./configure -- --options are ignored
-	# so that let's use preconfigure debian/CONFIG on Ubuntu
-	cp -p debian/CONFIG CONFIG
-	sed -i 's#CONFIG_PREFIX="/usr.*"#CONFIG_PREFIX="'$(pkg_prefix)'"#' CONFIG
-	# Use armv8-a on aarch64
-	test $(ARCH) != aarch64 || sed -i 's#CONFIG_ARCH=.*#CONFIG_ARCH=armv8-a#' CONFIG
-	# XLIO
-	test $(OS) != Ubuntu || sed -i 's#CONFIG_XLIO=.*#CONFIG_XLIO=y#' CONFIG
 	LDFLAGS="$$LDFLAGS -Wl,-rpath,$(pkg_prefix)/lib" ./configure $(CONF_OPTS)
 
 override_dh_auto_clean:
@@ -74,7 +70,7 @@ override_dh_auto_install:
 	install -p -m 644 scripts/bash-completion/spdk debian/tmp/etc/bash_completion.d
 	sed -i -e 's/ rpc.py/ spdk_rpc.py/' debian/tmp/etc/bash_completion.d/spdk
 	for so in debian/tmp$(pkg_prefix)/lib/lib*so.*; do \
-		patchelf --set-rpath /opt/mellanox/spdk/lib --force-rpath $$so || true; \
+		patchelf --set-rpath $(pkg_prefix)/lib --force-rpath $$so || true; \
 	done
 	rm -rf debian/tmp$(pkg_prefix)/share/dpdk/examples
 	(cd scripts ; python3 setup.py install --install-layout=deb --root=../debian/tmp )
@@ -93,7 +89,3 @@ override_dh_shlibdeps:
 override_dh_builddeb:
 	dh_builddeb -- -Zxz
 
-#override_dh_install:
-#	dh_install
-#override_dh_usrlocal:
-#	true

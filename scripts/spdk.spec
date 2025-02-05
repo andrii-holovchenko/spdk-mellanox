@@ -1,4 +1,4 @@
-%define scm_version 24.01.4
+%define scm_version 25.01.1
 %define unmangled_version %{scm_version}
 %define scm_rev %{_rev}
 Epoch: 0
@@ -125,6 +125,9 @@ export LDFLAGS
         --target-arch=armv8-a \
         --with-crypto \
 %endif
+%if %{defined ctyunos}
+        --with-xlio \
+%endif
         --disable-tests \
         --disable-unit-tests \
         --without-fio \
@@ -230,6 +233,9 @@ esac
 %changelog
 * %{_date} Andrii Holovchenko <andriih@nvidia.com>
 - build from %{_branch} (sha1 %{_sha1})
+
+* Wed Feb 5 2025 Andrii Holovchenko <andriih@nvidia.com>
+- Ported to v25.01.1 release
 
 * Thu Nov 21 2024 Andrii Holovchenko <andriih@nvidia.com>
 - Ported to v24.01.4 release
