@@ -2155,6 +2155,10 @@ nvme_tcp_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_c
 			TAILQ_REMOVE_CLEAR(&group->needs_poll, tqpair, link_poll);
 		}
 	} else {
+		if (qpair->ctrlr->timeout_enabled) {
+			nvme_tcp_qpair_check_timeout(qpair);
+		}
+
 		if (tqpair->sock_group) {
 			if (nvme_qpair_is_admin_queue(qpair)) {
 				pthread_mutex_lock(&g_admin_poll_group_mutex);
@@ -2170,10 +2174,6 @@ nvme_tcp_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_c
 			if (rc < 0 && errno != EAGAIN) {
 				SPDK_ERRLOG("Failed to flush tqpair=%p (%d): %s\n", tqpair,
 					    errno, spdk_strerror(errno));
-				if (tqpair->qpair.ctrlr->timeout_enabled) {
-					nvme_tcp_qpair_check_timeout(qpair);
-				}
-
 				if (nvme_qpair_get_state(qpair) == NVME_QPAIR_DISCONNECTING) {
 					if (TAILQ_EMPTY(&tqpair->outstanding_reqs)) {
 						nvme_transport_ctrlr_disconnect_qpair_done(qpair);
@@ -2200,10 +2200,6 @@ nvme_tcp_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_c
 		SPDK_DEBUGLOG(nvme, "Error polling CQ! (%d): %s\n",
 			      errno, spdk_strerror(errno));
 		goto fail;
-	}
-
-	if (tqpair->qpair.ctrlr->timeout_enabled) {
-		nvme_tcp_qpair_check_timeout(qpair);
 	}
 
 	if (spdk_unlikely(nvme_qpair_get_state(qpair) == NVME_QPAIR_CONNECTING)) {
