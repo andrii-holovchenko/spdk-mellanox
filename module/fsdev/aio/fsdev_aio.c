@@ -3951,7 +3951,7 @@ aio_io_poll(void *arg)
 {
 	struct aio_fsdev_io *vfsdev_io, *tmp;
 	struct aio_io_channel *ch = arg;
-	TAILQ_HEAD(, aio_fsdev_io) ios = TAILQ_HEAD_INITIALIZER(ios);
+	TAILQ_HEAD(aio_tmp_list, aio_fsdev_io) ios = TAILQ_HEAD_INITIALIZER(ios);
 	struct io_event events[32];
 	struct iocb *iocbs[32];
 	long to_submit = 0;
@@ -3978,29 +3978,30 @@ aio_io_poll(void *arg)
 		struct spdk_fsdev_io *fsdev_io = aio_to_fsdev_io(vfsdev_io);
 		enum spdk_fsdev_io_type type = spdk_fsdev_io_get_type(fsdev_io);
 
-		TAILQ_REMOVE(&ios, vfsdev_io, link);
-
 		rc = -EOPNOTSUPP;
 		res = SPDK_POLLER_BUSY;
 
 		switch (type) {
 		case SPDK_FSDEV_IO_READ:
 		case SPDK_FSDEV_IO_WRITE:
-			TAILQ_INSERT_TAIL(&ch->ios_in_progress, vfsdev_io, link);
 			iocbs[to_submit++] = &vfsdev_io->io;
 			rc = IO_STATUS_ASYNC;
 			break;
 		case SPDK_FSDEV_IO_POLL:
+			TAILQ_REMOVE(&ios, vfsdev_io, link);
 			rc = fsdev_aio_do_poll(ch, fsdev_io);
 			break;
 		case SPDK_FSDEV_IO_SETLK:
+			TAILQ_REMOVE(&ios, vfsdev_io, link);
 			rc = fsdev_aio_do_setlk(ch, fsdev_io);
 			break;
 		default:
+			TAILQ_REMOVE(&ios, vfsdev_io, link);
 			break;
 		}
 
 		if (rc != IO_STATUS_ASYNC) {
+			vfsdev_io->status = rc;
 			TAILQ_INSERT_TAIL(&ch->ios_to_complete, vfsdev_io, link);
 		}
 
@@ -4011,9 +4012,42 @@ aio_io_poll(void *arg)
 
 	if (to_submit > 0) {
 		rc = io_submit(ch->io_ctx, to_submit, iocbs);
-		if (rc < to_submit) {
-			/* TODO: Need to handle this error. Just blow up for now. */
-			assert(false);
+		if (rc < 0) {
+			res = rc;
+			rc = 0; /* 0 were submitted. This will get them all queued back up. */
+
+			if (res != -EAGAIN) {
+				/* The failures typically apply to the first iocb. Fail that one, but let the others
+				 * queue back up to be resubmitted. */
+				SPDK_ERRLOG("Failed io_submit: %s (%d)\n", spdk_strerror(-res), res);
+				vfsdev_io = TAILQ_FIRST(&ios);
+				TAILQ_REMOVE(&ios, vfsdev_io, link);
+				vfsdev_io->status = res;
+				TAILQ_INSERT_TAIL(&ch->ios_to_complete, vfsdev_io, link);
+			}
+		}
+
+		/* For each request actually submitted, shift it into the in progress list. */
+		i = 0;
+		TAILQ_FOREACH_SAFE(vfsdev_io, &ios, link, tmp) {
+			if (i == rc) {
+				break;
+			}
+
+			assert(&vfsdev_io->io == iocbs[i]);
+
+			TAILQ_REMOVE(&ios, vfsdev_io, link);
+			TAILQ_INSERT_TAIL(&ch->ios_in_progress, vfsdev_io, link);
+
+			i++;
+		}
+
+		/* For all remaining requests, put them back into the ios_for_submit list */
+		vfsdev_io = TAILQ_LAST(&ios, aio_tmp_list);
+		while (vfsdev_io != NULL) {
+			TAILQ_REMOVE(&ios, vfsdev_io, link);
+			TAILQ_INSERT_HEAD(&ch->ios_for_submit, vfsdev_io, link);
+			vfsdev_io = TAILQ_LAST(&ios, aio_tmp_list);
 		}
 	}
 
