@@ -656,6 +656,7 @@ file_handle_alloc(struct aio_fsdev_file_object *fobject, int fd)
 {
 	struct aio_fsdev_file_handle *fhandle;
 	struct aio_fsdev *vfsdev;
+	uint64_t lut_key;
 
 	assert(fobject != NULL);
 	vfsdev = fobject->vfsdev;
@@ -666,35 +667,27 @@ file_handle_alloc(struct aio_fsdev_file_object *fobject, int fd)
 		return NULL;
 	}
 
-	fhandle->hdr.refcount = 1; /* reference by caller */
+	fhandle->hdr.refcount = 0;
 	fhandle->fobject_lut_key = fobject->hdr.lut_key;
 	fhandle->vfsdev = vfsdev;
 	fhandle->fd = fd;
-
-	return fhandle;
-}
-
-/* Commit a newly allocated fhandle to the look up table so that it is visible to other operations. */
-static int
-file_handle_commit(struct aio_fsdev_file_object *fobject, struct aio_fsdev_file_handle *fhandle)
-{
-	struct aio_fsdev *vfsdev = fhandle->vfsdev;
-	uint64_t lut_key;
 
 	spdk_spin_lock(&vfsdev->lock);
 	lut_key = spdk_lut_insert(vfsdev->lut, fhandle);
 	if (lut_key != SPDK_LUT_INVALID_KEY) {
 		fhandle->hdr.lut_key = lut_key;
+		fhandle->hdr.refcount = 1;
 		__atomic_add_fetch(&fobject->hdr.refcount, 1, __ATOMIC_RELAXED); /* ref by fhandle */
 		TAILQ_INSERT_TAIL(&fobject->handles, fhandle, link);
 	} else {
 		spdk_spin_unlock(&vfsdev->lock);
 		SPDK_ERRLOG("Cannot insert fhandle into lookup table\n");
-		return -ENOMEM;
+		free(fhandle);
+		return NULL;
 	}
 	spdk_spin_unlock(&vfsdev->lock);
 
-	return 0;
+	return fhandle;
 }
 
 /* Mark a valid file handle as invalid so future lookups will correctly fail. */
@@ -889,8 +882,9 @@ static int
 fsdev_aio_op_opendir(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 {
 	struct aio_fsdev *vfsdev = fsdev_to_aio_fsdev(fsdev_io->fsdev);
-	int error;
+	int error = 0;
 	int fd;
+	DIR *dp = NULL;
 	struct aio_fsdev_file_object *fobject;
 	uint32_t flags = fsdev_io->u_in.opendir.flags;
 	struct aio_fsdev_file_handle *fhandle = NULL;
@@ -910,43 +904,37 @@ fsdev_aio_op_opendir(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 		goto do_return;
 	}
 
+	dp = fdopendir(fd);
+	if (dp == NULL) {
+		error = -errno;
+		SPDK_ERRLOG("fdopendir failed for " FOBJECT_FMT " (err=%d)\n", FOBJECT_ARGS(fobject), error);
+		close(fd);
+		goto do_return;
+	}
+
 	fhandle = file_handle_alloc(fobject, fd);
 	if (fhandle == NULL) {
 		error = -ENOMEM;
 		SPDK_ERRLOG("file_handle_alloc failed for " FOBJECT_FMT " (err=%d)\n", FOBJECT_ARGS(fobject),
 			    error);
+		closedir(dp);
 		goto do_return;
 	}
 
-	fhandle->dir.dp = fdopendir(fd);
-	if (fhandle->dir.dp == NULL) {
-		error = -errno;
-		assert(error);
-		SPDK_ERRLOG("fdopendir failed for " FOBJECT_FMT " (err=%d)\n", FOBJECT_ARGS(fobject), error);
-		goto do_return;
-	}
-
+	/* The fd is no longer valid once fdopendir succeeds, so
+	 * we just set it to -1 here. It is automatically closed
+	 * by closedir in the future. */
+	fhandle->fd = -1;
+	fhandle->dir.dp = dp;
 	fhandle->dir.offset = 0;
 	fhandle->dir.entry = NULL;
 
 	SPDK_DEBUGLOG(fsdev_aio, "OPENDIR succeeded for " FOBJECT_FMT " (fh=%p)\n",
 		      FOBJECT_ARGS(fobject), fhandle);
 
-	/* Make the handle visible as the final step */
-	error = file_handle_commit(fobject, fhandle);
-
 	fsdev_io->u_out.opendir.fhandle = fsdev_aio_get_spdk_fhandle(vfsdev, fhandle);
 
 do_return:
-	if (error) {
-		if (fhandle) {
-			/* The file handle is not committed if we received an error, so just destroy it */
-			file_handle_destroy(fhandle);
-		} else if (fd != -1) {
-			close(fd);
-		}
-	}
-
 	file_object_unref(fobject, 1);
 	return error;
 }
@@ -2341,13 +2329,6 @@ fsdev_aio_op_open(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 		goto fop_failed;
 	}
 
-	res = file_handle_commit(fobject, fhandle);
-	if (res != 0) {
-		SPDK_ERRLOG("Could not commit new file handle to look up table\n");
-		file_handle_destroy(fhandle);
-		goto fop_failed;
-	}
-
 	fsdev_io->u_out.open.fhandle = fsdev_aio_get_spdk_fhandle(vfsdev, fhandle);
 
 	res = 0;
@@ -2543,7 +2524,7 @@ fsdev_aio_op_create(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 		.euid = fsdev_io->u_in.create.euid,
 		.egid = fsdev_io->u_in.create.egid,
 	};
-	struct aio_fsdev_file_handle *fhandle;
+	struct aio_fsdev_file_handle *fhandle = NULL;
 	struct aio_fsdev_file_object *fobject = NULL;
 	struct spdk_fsdev_file_attr *attr = &fsdev_io->u_out.create.attr;
 
@@ -2593,19 +2574,11 @@ fsdev_aio_op_create(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 
 	fhandle = file_handle_alloc(fobject, fd);
 	if (!fhandle) {
+		file_object_unref(fobject, 1);
 		err = -ENOMEM;
 		SPDK_ERRLOG("CREATE: failed to create a file handle (fd=%d) with %d\n",
 			    fd, err);
-		goto fh_failed;
-	}
-
-	fd = -1; /* the fd is now attached to the fhandle, so we don't want to close it */
-
-	err = file_handle_commit(fobject, fhandle);
-	if (err != 0) {
-		SPDK_ERRLOG("Could not commit new file handle to look up table\n");
-		file_handle_destroy(fhandle);
-		goto fh_failed;
+		goto fop_failed;
 	}
 
 	SPDK_DEBUGLOG(fsdev_aio, "CREATE: succeeded (name=%s " FOBJECT_FMT " fh=%p)\n",
@@ -2614,15 +2587,10 @@ fsdev_aio_op_create(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 	fsdev_io->u_out.create.fobject = fsdev_aio_get_spdk_fobject(vfsdev, fobject);
 	fsdev_io->u_out.create.fhandle = fsdev_aio_get_spdk_fhandle(vfsdev, fhandle);
 
-
 	err = 0;
 
-fh_failed:
-	if (err) {
-		file_object_unref(fobject, 1);
-	}
 fop_failed:
-	if (fd >= 0) {
+	if (err && fd != -1) {
 		close(fd);
 	}
 	file_object_unref(parent_fobject, 1);
