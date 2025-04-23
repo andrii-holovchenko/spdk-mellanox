@@ -756,9 +756,10 @@ file_handle_destroy(struct aio_fsdev_file_handle *fhandle)
 
 	if (fhandle->dir.dp) {
 		closedir(fhandle->dir.dp);
+	} else {
+		close(fhandle->fd);
 	}
 
-	close(fhandle->fd);
 	free(fhandle);
 }
 
