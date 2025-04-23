@@ -220,7 +220,7 @@ spdk_lut_get(struct spdk_lut *lut, uint64_t key)
 		return (void *)(uint64_t)addr.value;
 	}
 
-	return NULL;
+	return SPDK_LUT_INVALID_VALUE;
 }
 
 int
