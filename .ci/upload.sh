@@ -25,6 +25,12 @@ get_releasever() {
   echo $releasever
 }
 
+get_os_name() {
+    . /etc/os-release
+    echo "${ID}_${VERSION_ID}"
+}
+
+
 upload_deb_urm() {
     # Import gpg key
     gpg --import ${GPG_KEY_PATH}
@@ -35,10 +41,15 @@ upload_deb_urm() {
     for deb_pkg in ${deb_pkgs[@]}; do
         test -e $deb_pkg
         echo "INFO: Signing package ${deb_pkg##*/}"
-        sign_deb=$(dpkg-sig -k ${gpg_key_name} -c ${deb_pkg}|tail -n1)
-        if [ $sign_deb == "NOSIG" ]; then 
-            dpkg-sig -k ${gpg_key_name} -s builder ${deb_pkg}
-        fi
+        # Debian 12 doesn't have dpkg-sig, so use debsigs
+        case "$(get_os_name)" in
+            debian_12|ubuntu_24.04)
+                debsigs --sign=origin -k ${gpg_key_name} ${deb_pkg}
+                ;;
+            *)
+                dpkg-sig -k ${gpg_key_name} -s builder ${deb_pkg}
+                ;;
+        esac
         MD5=$(md5sum $deb_pkg | awk '{print $1}')
         SHA1=$(shasum -a 1 $deb_pkg | awk '{ print $1 }')
         SHA256=$(shasum -a 256 $deb_pkg | awk '{ print $1 }')
