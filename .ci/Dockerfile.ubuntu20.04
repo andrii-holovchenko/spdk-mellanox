@@ -32,8 +32,10 @@ RUN apt-get update && \
       patchelf \
       python3-pyelftools \
       python3-requests \
+      python3-pip \
       linux-headers-generic \
-      pkg-config nasm
+      pkg-config nasm \
+      lsb-release
 
 RUN echo "deb [trusted=yes] https://urm.nvidia.com/artifactory/sw-nbu-swx-ci-debian-local focal liburing1" > /etc/apt/sources.list.d/liburing.list && \
     apt update && apt install -y liburing-dev
