@@ -600,14 +600,17 @@ spdk_sock_posix_fd_connect(int fd, struct addrinfo *res, struct spdk_sock_opts *
 	return sock_posix_fd_connect(fd, res, opts, true);
 }
 
-struct spdk_sock *
-spdk_sock_connect(const char *ip, int port, struct spdk_sock_opts *opts)
+static struct spdk_sock *
+sock_connect(const char *ip, int port, struct spdk_sock_opts *opts,
+	     bool async, spdk_sock_connect_cb_fn cb_fn, void *cb_arg)
 {
 	struct spdk_net_impl *impl = NULL;
 	struct spdk_sock_group_impl *group_impl;
 	struct spdk_sock *sock;
 	struct spdk_sock_opts opts_local;
 	const char *impl_name = NULL;
+
+	assert(async || (!cb_fn && !cb_arg));
 
 	if (opts == NULL) {
 		SPDK_ERRLOG("the opts should not be NULL pointer\n");
@@ -654,7 +657,12 @@ spdk_sock_connect(const char *ip, int port, struct spdk_sock_opts *opts)
 		return NULL;
 	}
 
-	sock = impl->connect(ip, port, group_impl, &opts_local);
+	if (async && impl->connect_async) {
+		sock = impl->connect_async(ip, port, group_impl, &opts_local, cb_fn, cb_arg);
+	} else {
+		sock = impl->connect(ip, port, group_impl, &opts_local);
+	}
+
 	if (!sock) {
 		return NULL;
 	}
@@ -671,7 +679,25 @@ spdk_sock_connect(const char *ip, int port, struct spdk_sock_opts *opts)
 	TAILQ_INIT(&sock->queued_reqs);
 	TAILQ_INIT(&sock->pending_reqs);
 
+	/* Invoke cb_fn only in case of fallback to sync version. */
+	if (cb_fn && async && !impl->connect_async) {
+		cb_fn(cb_arg, 0);
+	}
+
 	return sock;
+}
+
+struct spdk_sock *
+spdk_sock_connect(const char *ip, int port, struct spdk_sock_opts *opts)
+{
+	return sock_connect(ip, port, opts, false, NULL, NULL);
+}
+
+struct spdk_sock *
+spdk_sock_connect_async(const char *ip, int port, struct spdk_sock_opts *opts,
+			spdk_sock_connect_cb_fn cb_fn, void *cb_arg)
+{
+	return sock_connect(ip, port, opts, true, cb_fn, cb_arg);
 }
 
 struct spdk_sock *
