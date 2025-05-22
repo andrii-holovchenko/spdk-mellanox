@@ -550,7 +550,7 @@ int spdk_sock_release_buf(struct spdk_sock *sock, void *buf, struct spdk_sock_bu
  * \param sock Socket to set for.
  * \param nbytes Value for recvlowat.
  *
- * \return 0 on success, -1 on failure.
+ * \return 0 on success, -1 on failure with errno set.
  */
 int spdk_sock_set_recvlowat(struct spdk_sock *sock, int nbytes);
 
@@ -560,7 +560,7 @@ int spdk_sock_set_recvlowat(struct spdk_sock *sock, int nbytes);
  * \param sock Socket to set buffer size for.
  * \param sz Buffer size in bytes.
  *
- * \return 0 on success, -1 on failure.
+ * \return 0 on success, -1 on failure with errno set.
  */
 int spdk_sock_set_recvbuf(struct spdk_sock *sock, int sz);
 
@@ -570,7 +570,7 @@ int spdk_sock_set_recvbuf(struct spdk_sock *sock, int sz);
  * \param sock Socket to set buffer size for.
  * \param sz Buffer size in bytes.
  *
- * \return 0 on success, -1 on failure.
+ * \return 0 on success, -1 on failure with errno set.
  */
 int spdk_sock_set_sendbuf(struct spdk_sock *sock, int sz);
 
