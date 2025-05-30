@@ -12,7 +12,6 @@
 #include "spdk/barrier.h"
 #include "spdk/env.h"
 #include "spdk/log.h"
-#include "spdk/pipe.h"
 #include "spdk/sock.h"
 #include "spdk/string.h"
 #include "spdk/util.h"
@@ -74,16 +73,12 @@ struct spdk_uring_sock {
 	struct spdk_uring_task			errqueue_task;
 	struct spdk_uring_task			read_task;
 	struct spdk_uring_task			cancel_task;
-	struct spdk_pipe			*recv_pipe;
-	void					*recv_buf;
-	int					recv_buf_sz;
 	bool					zcopy;
 	bool					pending_recv;
 	bool					pending_group_remove;
 	int					zcopy_send_flags;
 	int					connection_status;
 	int					placement_id;
-	uint8_t                                 reserved[4];
 	uint8_t					buf[SPDK_SOCK_CMG_INFO_SIZE];
 	TAILQ_ENTRY(spdk_uring_sock)		link;
 	char					interface_name[IFNAMSIZ];
@@ -123,7 +118,7 @@ struct spdk_uring_sock_group_impl {
 static struct spdk_sock_impl_opts g_spdk_uring_sock_impl_opts = {
 	.recv_buf_size = DEFAULT_SO_RCVBUF_SIZE,
 	.send_buf_size = DEFAULT_SO_SNDBUF_SIZE,
-	.enable_recv_pipe = true,
+	.enable_recv_pipe = false,
 	.enable_quickack = false,
 	.enable_placement_id = PLACEMENT_NONE,
 	.enable_zerocopy_send_server = false,
@@ -281,75 +276,6 @@ enum uring_sock_create_type {
 };
 
 static int
-uring_sock_alloc_pipe(struct spdk_uring_sock *sock, int sz)
-{
-	uint8_t *new_buf;
-	struct spdk_pipe *new_pipe;
-	struct iovec siov[2];
-	struct iovec diov[2];
-	int sbytes;
-	ssize_t bytes;
-	int rc;
-
-	if (sock->recv_buf_sz == sz) {
-		return 0;
-	}
-
-	/* If the new size is 0, just free the pipe */
-	if (sz == 0) {
-		spdk_pipe_destroy(sock->recv_pipe);
-		free(sock->recv_buf);
-		sock->recv_pipe = NULL;
-		sock->recv_buf = NULL;
-		return 0;
-	} else if (sz < MIN_SOCK_PIPE_SIZE) {
-		SPDK_ERRLOG("The size of the pipe must be larger than %d\n", MIN_SOCK_PIPE_SIZE);
-		return -1;
-	}
-
-	/* Round up to next 64 byte multiple */
-	rc = posix_memalign((void **)&new_buf, 64, sz);
-	if (rc != 0) {
-		SPDK_ERRLOG("socket recv buf allocation failed\n");
-		return -ENOMEM;
-	}
-	memset(new_buf, 0, sz);
-
-	new_pipe = spdk_pipe_create(new_buf, sz);
-	if (new_pipe == NULL) {
-		SPDK_ERRLOG("socket pipe allocation failed\n");
-		free(new_buf);
-		return -ENOMEM;
-	}
-
-	if (sock->recv_pipe != NULL) {
-		/* Pull all of the data out of the old pipe */
-		sbytes = spdk_pipe_reader_get_buffer(sock->recv_pipe, sock->recv_buf_sz, siov);
-		if (sbytes > sz) {
-			/* Too much data to fit into the new pipe size */
-			spdk_pipe_destroy(new_pipe);
-			free(new_buf);
-			return -EINVAL;
-		}
-
-		sbytes = spdk_pipe_writer_get_buffer(new_pipe, sz, diov);
-		assert(sbytes == sz);
-
-		bytes = spdk_iovcpy(siov, 2, diov, 2);
-		spdk_pipe_writer_advance(new_pipe, bytes);
-
-		spdk_pipe_destroy(sock->recv_pipe);
-		free(sock->recv_buf);
-	}
-
-	sock->recv_buf_sz = sz;
-	sock->recv_buf = new_buf;
-	sock->recv_pipe = new_pipe;
-
-	return 0;
-}
-
-static int
 uring_sock_set_recvbuf(struct spdk_sock *_sock, int sz)
 {
 	struct spdk_uring_sock *sock = __uring_sock(_sock);
@@ -357,14 +283,6 @@ uring_sock_set_recvbuf(struct spdk_sock *_sock, int sz)
 	int rc;
 
 	assert(sock != NULL);
-
-	if (_sock->impl_opts.enable_recv_pipe) {
-		rc = uring_sock_alloc_pipe(sock, sz);
-		if (rc) {
-			SPDK_ERRLOG("unable to allocate sufficient recvbuf with sz=%d on sock=%p\n", sz, _sock);
-			return rc;
-		}
-	}
 
 	/* Set kernel buffer size to be at least MIN_SO_RCVBUF_SIZE and
 	 * g_spdk_uring_sock_impl_opts.recv_buf_size. */
@@ -643,48 +561,7 @@ uring_sock_close(struct spdk_sock_group_impl *group, struct spdk_sock *_sock)
 	 * memory. */
 	close(sock->fd);
 
-	spdk_pipe_destroy(sock->recv_pipe);
-	free(sock->recv_buf);
-	free(sock);
-
 	return 0;
-}
-
-static ssize_t
-uring_sock_recv_from_pipe(struct spdk_uring_sock *sock, struct iovec *diov, int diovcnt)
-{
-	struct iovec siov[2];
-	int sbytes;
-	ssize_t bytes;
-	struct spdk_uring_sock_group_impl *group;
-
-	sbytes = spdk_pipe_reader_get_buffer(sock->recv_pipe, sock->recv_buf_sz, siov);
-	if (sbytes < 0) {
-		errno = EINVAL;
-		return -1;
-	} else if (sbytes == 0) {
-		errno = EAGAIN;
-		return -1;
-	}
-
-	bytes = spdk_iovcpy(siov, 2, diov, diovcnt);
-
-	if (bytes == 0) {
-		/* The only way this happens is if diov is 0 length */
-		errno = EINVAL;
-		return -1;
-	}
-
-	spdk_pipe_reader_advance(sock->recv_pipe, bytes);
-
-	/* If we drained the pipe, take it off the level-triggered list */
-	if (sock->base.group_impl && spdk_pipe_reader_bytes_available(sock->recv_pipe) == 0) {
-		group = __uring_group_impl(sock->base.group_impl);
-		TAILQ_REMOVE(&group->pending_recv, sock, link);
-		sock->pending_recv = false;
-	}
-
-	return bytes;
 }
 
 static inline ssize_t
@@ -698,32 +575,8 @@ sock_readv(int fd, struct iovec *iov, int iovcnt)
 	return recvmsg(fd, &msg, MSG_DONTWAIT);
 }
 
-static inline ssize_t
-uring_sock_read(struct spdk_uring_sock *sock)
-{
-	struct iovec iov[2];
-	int bytes;
-	struct spdk_uring_sock_group_impl *group;
-
-	bytes = spdk_pipe_writer_get_buffer(sock->recv_pipe, sock->recv_buf_sz, iov);
-
-	if (bytes > 0) {
-		bytes = sock_readv(sock->fd, iov, 2);
-		if (bytes > 0) {
-			spdk_pipe_writer_advance(sock->recv_pipe, bytes);
-			if (sock->base.group_impl && !sock->pending_recv) {
-				group = __uring_group_impl(sock->base.group_impl);
-				TAILQ_INSERT_TAIL(&group->pending_recv, sock, link);
-				sock->pending_recv = true;
-			}
-		}
-	}
-
-	return bytes;
-}
-
 static ssize_t
-uring_sock_readv_no_pipe(struct spdk_sock *_sock, struct iovec *iovs, int iovcnt)
+uring_sock_readv(struct spdk_sock *_sock, struct iovec *iovs, int iovcnt)
 {
 	struct spdk_uring_sock *sock = __uring_sock(_sock);
 	struct spdk_uring_buf_tracker *tr;
@@ -736,12 +589,8 @@ uring_sock_readv_no_pipe(struct spdk_sock *_sock, struct iovec *iovs, int iovcnt
 		return -1;
 	}
 
-	if (_sock->group_impl == NULL) {
-		/* If not in a group just read from the socket the regular way. */
-		return sock_readv(sock->fd, iovs, iovcnt);
-	}
-
 	if (STAILQ_EMPTY(&sock->recv_stream)) {
+		/* TODO: Do we need to do this? */
 		if (sock->group->buf_ring_count == 0) {
 			/* If the user hasn't posted any buffers, read from the socket
 			 * directly. */
@@ -776,6 +625,7 @@ uring_sock_readv_no_pipe(struct spdk_sock *_sock, struct iovec *iovs, int iovcnt
 			if (sock->recv_offset == tr->len) {
 				sock->recv_offset = 0;
 				STAILQ_REMOVE_HEAD(&sock->recv_stream, link);
+				/* TODO: Will need a reference count? */
 				STAILQ_INSERT_HEAD(&sock->group->free_trackers, tr, link);
 				tr = STAILQ_FIRST(&sock->recv_stream);
 			}
@@ -796,44 +646,6 @@ uring_sock_readv_no_pipe(struct spdk_sock *_sock, struct iovec *iovs, int iovcnt
 
 	assert(total > 0);
 	return total;
-}
-
-static ssize_t
-uring_sock_readv(struct spdk_sock *_sock, struct iovec *iov, int iovcnt)
-{
-	struct spdk_uring_sock *sock = __uring_sock(_sock);
-	int rc, i;
-	size_t len;
-
-	if (sock->connection_status < 0) {
-		errno = -sock->connection_status;
-		return -1;
-	}
-
-	if (sock->recv_pipe == NULL) {
-		return uring_sock_readv_no_pipe(_sock, iov, iovcnt);
-	}
-
-	len = 0;
-	for (i = 0; i < iovcnt; i++) {
-		len += iov[i].iov_len;
-	}
-
-	if (spdk_pipe_reader_bytes_available(sock->recv_pipe) == 0) {
-		/* If the user is receiving a sufficiently large amount of data,
-		 * receive directly to their buffers. */
-		if (len >= MIN_SOCK_PIPE_SIZE) {
-			return sock_readv(sock->fd, iov, iovcnt);
-		}
-
-		/* Otherwise, do a big read into our pipe */
-		rc = uring_sock_read(sock);
-		if (rc <= 0) {
-			return rc;
-		}
-	}
-
-	return uring_sock_recv_from_pipe(sock, iov, iovcnt);
 }
 
 static ssize_t
@@ -1603,13 +1415,7 @@ uring_sock_group_impl_add_sock(struct spdk_sock_group_impl *_group,
 	sock->cancel_task.sock = sock;
 	sock->cancel_task.type = URING_TASK_CANCEL;
 
-	/* switched from another polling group due to scheduling */
-	if (spdk_unlikely(sock->recv_pipe != NULL &&
-			  (spdk_pipe_reader_bytes_available(sock->recv_pipe) > 0))) {
-		assert(sock->pending_recv == false);
-		sock->pending_recv = true;
-		TAILQ_INSERT_TAIL(&group->pending_recv, sock, link);
-	}
+	assert(sock->pending_recv == false);
 
 	if (sock->placement_id != -1) {
 		rc = spdk_sock_map_insert(&g_map, sock->placement_id, &group->base);
@@ -1635,11 +1441,6 @@ uring_sock_group_populate_buf_ring(struct spdk_uring_sock_group_impl *group)
 {
 	struct spdk_uring_buf_tracker *tracker;
 	int count, mask;
-
-	if (g_spdk_uring_sock_impl_opts.enable_recv_pipe) {
-		/* If recv_pipe is enabled, we do not post buffers. */
-		return;
-	}
 
 	/* Try to re-populate the io_uring's buffer pool using user-provided buffers */
 	tracker = STAILQ_FIRST(&group->free_trackers);
