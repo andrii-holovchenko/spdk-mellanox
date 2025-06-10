@@ -410,7 +410,7 @@ struct addrinfo *spdk_sock_posix_getaddrinfo(const char *ip, int port);
  *
  * Use close() when returned fd is no longer needed.
  *
- * \return fd on success, -1 on failure.
+ * \return 0 on success, negative errno value on failure.
  */
 int spdk_sock_posix_fd_create(struct addrinfo *res, struct spdk_sock_opts *opts,
 			      struct spdk_sock_impl_opts *impl_opts);
@@ -420,7 +420,7 @@ int spdk_sock_posix_fd_create(struct addrinfo *res, struct spdk_sock_opts *opts,
  *
  * On success O_NONBLOCK is cleared otherwise property value is undefined.
  *
- * \return 0 on success, -1 on failure.
+ * \return 0 on success, negative errno value on failure.
  */
 int spdk_sock_posix_fd_connect(int fd, struct addrinfo *res, struct spdk_sock_opts *opts);
 
@@ -431,14 +431,14 @@ int spdk_sock_posix_fd_connect(int fd, struct addrinfo *res, struct spdk_sock_op
  *
  * User must use \ref spdk_sock_posix_fd_connect_poll_async to determine connection status.
  *
- * \return 0 on success, -1 on failure.
+ * \return 0 on success, negative errno value on failure.
  */
 int spdk_sock_posix_fd_connect_async(int fd, struct addrinfo *res, struct spdk_sock_opts *opts);
 
 /**
  * Polls the socket connection status.
  *
- * \return 0 on connect success, -1 on failure and -EAGAIN to retry later.
+ * \return 0 on success, negative errno value on failure.
  */
 int spdk_sock_posix_fd_connect_poll_async(int fd);
 
