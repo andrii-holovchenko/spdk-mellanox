@@ -198,6 +198,7 @@ static struct spdk_bdev_nvme_opts g_opts = {
 	.small_cache_size = BDEV_NVME_IOBUF_SMALL_CACHE_SIZE,
 	.large_cache_size = BDEV_NVME_IOBUF_LARGE_CACHE_SIZE,
 	.rdma_umr_per_io = false,
+	.enable_flush = false,
 };
 
 #define NVME_HOTPLUG_POLL_PERIOD_MAX			10000000ULL
@@ -3539,6 +3540,8 @@ static int bdev_nvme_unmap(struct nvme_bdev_io *bio, uint64_t offset_blocks,
 static int bdev_nvme_write_zeroes(struct nvme_bdev_io *bio, uint64_t offset_blocks,
 				  uint64_t num_blocks, uint32_t io_flags);
 
+static int bdev_nvme_flush(struct nvme_bdev_io *bio);
+
 static int bdev_nvme_copy(struct nvme_bdev_io *bio, uint64_t dst_offset_blocks,
 			  uint64_t src_offset_blocks,
 			  uint64_t num_blocks);
@@ -3658,8 +3661,14 @@ _bdev_nvme_submit_request(struct nvme_bdev_channel *nbdev_ch, struct spdk_bdev_i
 		return;
 
 	case SPDK_BDEV_IO_TYPE_FLUSH:
-		bdev_nvme_io_complete(nbdev_io, 0);
-		return;
+		/* No need to send flush if Volatile Write Cache is disabled */
+		if (!bdev->write_cache || !g_opts.enable_flush) {
+			bdev_nvme_io_complete(nbdev_io, 0);
+			return;
+		}
+
+		rc = bdev_nvme_flush(nbdev_io);
+		break;
 
 	case SPDK_BDEV_IO_TYPE_ZONE_APPEND:
 		rc = bdev_nvme_zone_appendv(nbdev_io,
@@ -6768,6 +6777,7 @@ spdk_bdev_nvme_get_opts(struct spdk_bdev_nvme_opts *opts, size_t opts_size)
 	SET_FIELD(large_cache_size, 0);
 	SET_FIELD(rdma_umr_per_io, false);
 	SET_FIELD(tcp_connect_timeout_ms, 0);
+	SET_FIELD(enable_flush, false);
 
 #undef SET_FIELD
 
@@ -6893,6 +6903,7 @@ spdk_bdev_nvme_set_opts(const struct spdk_bdev_nvme_opts *opts)
 	SET_FIELD(large_cache_size, 0);
 	SET_FIELD(rdma_umr_per_io, 0);
 	SET_FIELD(tcp_connect_timeout_ms, 0);
+	SET_FIELD(enable_flush, false);
 
 	g_opts.opts_size = opts->opts_size;
 
@@ -9286,6 +9297,14 @@ bdev_nvme_write_zeroes(struct nvme_bdev_io *bio, uint64_t offset_blocks, uint64_
 }
 
 static int
+bdev_nvme_flush(struct nvme_bdev_io *bio)
+{
+	return spdk_nvme_ns_cmd_flush(bio->io_path->nvme_ns->ns,
+				      bio->io_path->qpair->qpair,
+				      bdev_nvme_queued_done, bio);
+}
+
+static int
 bdev_nvme_get_zone_info(struct nvme_bdev_io *bio, uint64_t zone_id, uint32_t num_zones,
 			struct spdk_bdev_zone_info *info)
 {
@@ -9626,6 +9645,8 @@ bdev_nvme_opts_config_json(struct spdk_json_write_ctx *w)
 	spdk_json_write_named_uint32(w, "large_cache_size", g_opts.large_cache_size);
 	spdk_json_write_named_bool(w, "rdma_umr_per_io", g_opts.rdma_umr_per_io);
 	spdk_json_write_named_uint32(w, "tcp_connect_timeout_ms", g_opts.tcp_connect_timeout_ms);
+	spdk_json_write_named_bool(w, "enable_flush", g_opts.enable_flush);
+
 	spdk_json_write_object_end(w);
 
 	spdk_json_write_object_end(w);

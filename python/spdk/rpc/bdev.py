@@ -649,6 +649,7 @@ def bdev_nvme_set_options(client, **params):
         large_cache_size: The number of large iobuf elements in cache. Default: 128
         rdma_umr_per_io: Enable/disable scatter-gather UMR per IO in RDMA transport if supported by system (optional).
         tcp_connect_timeout_ms: Time to wait until TCP connection is done. Default: 0 (no timeout).
+        enable_flush: Pass flush to nvme devices when volatile write cache is present. Default: false
     """
 
     strip_globals(params)

@@ -111,6 +111,7 @@ struct spdk_bdev_nvme_opts {
 	/* Hole at bytes 133-135. */
 	uint8_t reserved133[3];
 	uint32_t tcp_connect_timeout_ms;
+	bool enable_flush;
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_bdev_nvme_opts) == 144, "Incorrect size");
 
