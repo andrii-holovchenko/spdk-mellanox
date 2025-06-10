@@ -1950,7 +1950,7 @@ test_nvme_tcp_ctrlr_construct(void)
 
 	/* Transmit ACK timeout value exceeds max, expected to pass and using max */
 	opts.transport_ack_timeout = NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT + 1;
-	MOCK_SET(spdk_sock_connect, (struct spdk_sock *)0xDEADBEEF);
+	MOCK_SET(spdk_sock_connect_async, (struct spdk_sock *)0xDEADBEEF);
 	ctrlr = nvme_tcp_ctrlr_construct(&trid, &opts, NULL);
 	tctrlr = nvme_tcp_ctrlr(ctrlr);
 	tqpair = nvme_tcp_qpair(tctrlr->ctrlr.adminq);
@@ -1991,13 +1991,13 @@ test_nvme_tcp_ctrlr_construct(void)
 
 	/* Error connecting socket, expected to create Admin qpair failed */
 	trid.adrfam = SPDK_NVMF_ADRFAM_IPV4;
-	MOCK_SET(spdk_sock_connect, NULL);
+	MOCK_SET(spdk_sock_connect_async, NULL);
 	ctrlr = nvme_tcp_ctrlr_construct(&trid, &opts, NULL);
 	rc = nvme_tcp_ctrlr_connect_qpair(ctrlr, ctrlr->adminq);
 	CU_ASSERT(rc == -1);
 	nvme_tcp_ctrlr_destruct(ctrlr);
 
-	MOCK_CLEAR(spdk_sock_connect);
+	MOCK_CLEAR(spdk_sock_connect_async);
 }
 
 static void
@@ -2026,7 +2026,7 @@ test_nvme_tcp_qpair_submit_request(void)
 
 	/* Construct TCP Controller */
 	opts.transport_ack_timeout = NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT + 1;
-	MOCK_SET(spdk_sock_connect, (struct spdk_sock *)0xDCADBEEF);
+	MOCK_SET(spdk_sock_connect_async, (struct spdk_sock *)0xDCADBEEF);
 
 	ctrlr = nvme_tcp_ctrlr_construct(&trid, &opts, NULL);
 	CU_ASSERT(ctrlr != NULL);
@@ -2106,7 +2106,7 @@ test_nvme_tcp_qpair_submit_request(void)
 	CU_ASSERT(rc == -EAGAIN);
 	CU_ASSERT(tqpair->stats->queued_requests == 1);
 
-	MOCK_CLEAR(spdk_sock_connect);
+	MOCK_CLEAR(spdk_sock_connect_async);
 	free(tqpair->tcp_reqs);
 	spdk_free(tqpair->send_pdus);
 	free(tqpair);

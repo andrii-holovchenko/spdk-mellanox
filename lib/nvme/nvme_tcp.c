@@ -2283,6 +2283,17 @@ nvme_tcp_qpair_no_group_sock_cb(void *ctx, struct spdk_sock_group *group, struct
 	/* Do nothing. The qpair will be checked for recv data no matter what. */
 }
 
+static void
+nvme_tcp_sock_connect_cb_fn(void *cb_arg, int status)
+{
+	struct nvme_tcp_qpair *tqpair = cb_arg;
+
+	if (status < 0) {
+		SPDK_ERRLOG("sock connection error of tqpair=%p with %d (%s)\n", tqpair, status,
+			    spdk_strerror(abs(status)));
+	}
+}
+
 static int
 nvme_tcp_qpair_connect_sock(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpair *qpair)
 {
@@ -2412,7 +2423,9 @@ nvme_tcp_qpair_connect_sock(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpai
 		opts.impl_opts = &impl_opts;
 		opts.impl_opts_size = sizeof(impl_opts);
 	}
-	tqpair->sock = spdk_sock_connect(ctrlr->trid.traddr, port, &opts);
+
+	tqpair->sock = spdk_sock_connect_async(ctrlr->trid.traddr, port, &opts,
+					       nvme_tcp_sock_connect_cb_fn, tqpair);
 	if (!tqpair->sock) {
 		SPDK_ERRLOG("sock connection error of tqpair=%p with addr=%s, port=%ld\n",
 			    tqpair, ctrlr->trid.traddr, port);

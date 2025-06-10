@@ -170,6 +170,21 @@ spdk_sock_connect(const char *ip, int port, struct spdk_sock_opts *opts)
 	return sock;
 }
 
+DEFINE_RETURN_MOCK(spdk_sock_connect_async, struct spdk_sock *);
+struct spdk_sock *
+spdk_sock_connect_async(const char *ip, int port, struct spdk_sock_opts *opts,
+			spdk_sock_connect_cb_fn cb_fn, void *cb_arg)
+{
+	struct spdk_sock *sock;
+
+	HANDLE_RETURN_MOCK(spdk_sock_connect_async);
+
+	sock = spdk_sock_connect(ip, port, opts);
+	cb_fn(cb_arg, 0);
+
+	return sock;
+}
+
 DEFINE_RETURN_MOCK(spdk_sock_close, int);
 int
 spdk_sock_close(struct spdk_sock **_sock)
