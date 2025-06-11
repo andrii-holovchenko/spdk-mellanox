@@ -91,6 +91,9 @@ spdk_rdma_provider_qp_create(struct rdma_cm_id *cm_id,
 	rc = spdk_mlx5_qp_create(pd, dv_cq->mlx5_cq, &mlx5_qp_attr, &dv_qp->mlx5_qp);
 	if (rc) {
 		SPDK_ERRLOG("Failed to create qpair, rc %d\n", rc);
+		if (!dv_qp->common.shared_stats) {
+			free(dv_qp->common.stats);
+		}
 		free(dv_qp);
 		return NULL;
 	}
