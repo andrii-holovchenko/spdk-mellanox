@@ -1462,7 +1462,6 @@ test_nvme_tcp_ctrlr_connect_qpair(void)
 	tqpair.qpair.state = NVME_QPAIR_CONNECTING;
 	tqpair.qpair.id = 0;
 	tqpair.qpair.poll_group = NULL;
-	tqpair.flags.icreq_send_ack = 0;
 
 	rc = nvme_tcp_ctrlr_connect_qpair(&ctrlr, &tqpair.qpair);
 	CU_ASSERT(rc == 0);
@@ -1514,7 +1513,6 @@ test_nvme_tcp_ctrlr_connect_qpair(void)
 	tqpair.qpair.state = NVME_QPAIR_CONNECTING;
 	tqpair.qpair.id = 1;
 	tqpair.qpair.poll_group = NULL;
-	tqpair.flags.icreq_send_ack = 0;
 
 	rc = nvme_tcp_ctrlr_connect_qpair(&ctrlr, &tqpair.qpair);
 	CU_ASSERT(rc == 0);
@@ -1566,7 +1564,6 @@ test_nvme_tcp_ctrlr_connect_qpair(void)
 	tqpair.qpair.state = NVME_QPAIR_CONNECTING;
 	tqpair.qpair.id = 1;
 	tqpair.qpair.poll_group = &tgroup.group;
-	tqpair.flags.icreq_send_ack = 0;
 
 	rc = nvme_tcp_ctrlr_connect_qpair(&ctrlr, &tqpair.qpair);
 	CU_ASSERT(rc == 0);
