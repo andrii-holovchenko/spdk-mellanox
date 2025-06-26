@@ -1100,7 +1100,6 @@ test_nvme_tcp_qpair_icreq_send(void)
 	struct nvme_tcp_pdu pdu = {};
 	struct nvme_tcp_poll_group poll_group = {};
 	struct spdk_nvme_tcp_ic_req *ic_req = NULL;
-	int rc;
 
 	STAILQ_INIT(&tqpair.qpair.free_req);
 	tqpair.qpair.active_free_req = &tqpair.qpair.free_req;
@@ -1115,8 +1114,7 @@ test_nvme_tcp_qpair_icreq_send(void)
 	tqpair.qpair.ctrlr->opts.data_digest = true;
 	TAILQ_INIT(&tqpair.send_queue);
 
-	rc = nvme_tcp_qpair_icreq_send(&tqpair);
-	CU_ASSERT(rc == 0);
+	nvme_tcp_qpair_icreq_send(&tqpair);
 	CU_ASSERT(ic_req->common.hlen == sizeof(*ic_req));
 	CU_ASSERT(ic_req->common.plen == sizeof(*ic_req));
 	CU_ASSERT(ic_req->common.pdu_type == SPDK_NVME_TCP_PDU_TYPE_IC_REQ);
