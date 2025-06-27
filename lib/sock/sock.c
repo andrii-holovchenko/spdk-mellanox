@@ -650,6 +650,11 @@ sock_connect(const char *ip, int port, struct spdk_sock_opts *opts,
 		return NULL;
 	}
 
+	if (async && !impl->connect_async) {
+		SPDK_ERRLOG("Asynchronous connect is not supported by %s\n", impl->name);
+		return NULL;
+	}
+
 	SPDK_DEBUGLOG(sock, "Creating a client socket using impl %s\n", impl->name);
 	sock_init_opts(&opts_local, opts);
 	if (opts_local.connect_timeout > INT_MAX) {
@@ -657,7 +662,7 @@ sock_connect(const char *ip, int port, struct spdk_sock_opts *opts,
 		return NULL;
 	}
 
-	if (async && impl->connect_async) {
+	if (async) {
 		sock = impl->connect_async(ip, port, group_impl, &opts_local, cb_fn, cb_arg);
 	} else {
 		sock = impl->connect(ip, port, group_impl, &opts_local);
@@ -678,12 +683,6 @@ sock_connect(const char *ip, int port, struct spdk_sock_opts *opts,
 	TAILQ_INSERT_TAIL(&group_impl->socks, sock, link);
 	TAILQ_INIT(&sock->queued_reqs);
 	TAILQ_INIT(&sock->pending_reqs);
-
-	/* Invoke cb_fn only in case of fallback to sync version. */
-	if (cb_fn && async && !impl->connect_async) {
-		cb_fn(cb_arg, 0);
-	}
-
 	return sock;
 }
 
