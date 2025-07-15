@@ -676,6 +676,53 @@ uring_sock_writev(struct spdk_sock *_sock, struct iovec *iov, int iovcnt)
 	return sendmsg(sock->fd, &msg, MSG_DONTWAIT);
 }
 
+static int
+uring_sock_group_impl_release_buf(struct spdk_sock_group_impl *_group, void *buf,
+				  struct spdk_sock_buf_token *token)
+{
+	struct spdk_uring_sock_group_impl *group = __uring_group_impl(_group);
+	struct spdk_uring_buf_tracker *tracker;
+
+	tracker = (struct spdk_uring_buf_tracker *)token;
+	tracker->len = 0;
+	tracker->ctx = NULL;
+	STAILQ_INSERT_HEAD(&group->free_trackers, tracker, link);
+
+	return 0;
+}
+
+static int
+uring_sock_recv_next(struct spdk_sock *_sock, void **buf, struct spdk_sock_buf_token **token)
+{
+	struct spdk_uring_sock *sock = __uring_sock(_sock);
+	struct spdk_uring_buf_tracker *tr;
+
+	if (sock->connection_status < 0) {
+		errno = -sock->connection_status;
+		return -1;
+	}
+
+	tr = STAILQ_FIRST(&sock->recv_stream);
+	if (tr == NULL) {
+		*buf = NULL;
+		return 0;
+	}
+
+	STAILQ_REMOVE_HEAD(&sock->recv_stream, link);
+	if (STAILQ_EMPTY(&sock->recv_stream)) {
+		struct spdk_uring_sock_group_impl *group;
+
+		group = __uring_group_impl(_sock->group_impl);
+		sock->pending_recv = false;
+		TAILQ_REMOVE(&group->pending_recv, sock, link);
+	}
+
+	*buf = tr->buf + sock->recv_offset;
+	*token = (struct spdk_sock_buf_token *)tr;
+
+	return tr->len - sock->recv_offset;
+}
+
 static ssize_t
 sock_request_advance_offset(struct spdk_sock_request *req, ssize_t rc)
 {
@@ -1686,6 +1733,7 @@ static struct spdk_net_impl g_uring_net_impl = {
 	.recv		= uring_sock_recv,
 	.readv		= uring_sock_readv,
 	.writev		= uring_sock_writev,
+	.recv_next	= uring_sock_recv_next,
 	.writev_async	= uring_sock_writev_async,
 	.flush          = uring_sock_flush,
 	.set_recvlowat	= uring_sock_set_recvlowat,
@@ -1701,6 +1749,7 @@ static struct spdk_net_impl g_uring_net_impl = {
 	.group_impl_poll	= uring_sock_group_impl_poll,
 	.group_impl_get_interruptfd    = uring_sock_group_impl_get_interruptfd,
 	.group_impl_close	= uring_sock_group_impl_close,
+	.group_impl_release_buf = uring_sock_group_impl_release_buf,
 	.get_opts		= uring_sock_impl_get_opts,
 	.set_opts		= uring_sock_impl_set_opts,
 };
