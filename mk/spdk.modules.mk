@@ -130,7 +130,7 @@ endif
 
 EVENT_BDEV_SUBSYSTEM = event_bdev event_accel event_vmd event_sock event_iobuf
 
-FSDEV_MODULES_LIST = event_fsdev event_rmem fsdev
+FSDEV_MODULES_LIST = event_fsdev event_rmem event_sock fsdev
 
 ifeq ($(OS), Linux)
 FSDEV_MODULES_LIST += fsdev_aio
