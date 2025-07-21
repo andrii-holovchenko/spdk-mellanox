@@ -246,10 +246,12 @@ xlio_sock_getaddr(struct spdk_sock *_sock, char *saddr, int slen, uint16_t *spor
 		return -1;
 	}
 
-	rc = spdk_net_get_address_string((struct sockaddr *)&sa, saddr, slen);
-	if (rc != 0) {
-		SPDK_ERRLOG("spdk_net_get_address_string() failed (errno=%d)\n", rc);
-		return -1;
+	if (saddr) {
+		rc = spdk_net_get_address_string((struct sockaddr *)&sa, saddr, slen);
+		if (rc != 0) {
+			SPDK_ERRLOG("spdk_net_get_address_string() failed (errno=%d)\n", rc);
+			return -1;
+		}
 	}
 
 	if (sport) {
@@ -260,18 +262,22 @@ xlio_sock_getaddr(struct spdk_sock *_sock, char *saddr, int slen, uint16_t *spor
 		}
 	}
 
-	memset(&sa, 0, sizeof sa);
-	salen = sizeof sa;
-	rc = xlio_socket_getpeername(sock->xlio_sock, (struct sockaddr *)&sa, &salen);
-	if (rc != 0) {
-		SPDK_ERRLOG("getpeername() failed (errno=%d)\n", errno);
-		return -1;
+	if (caddr || cport) {
+		memset(&sa, 0, sizeof sa);
+		salen = sizeof sa;
+		rc = xlio_socket_getpeername(sock->xlio_sock, (struct sockaddr *)&sa, &salen);
+		if (rc != 0) {
+			SPDK_ERRLOG("getpeername() failed (errno=%d)\n", errno);
+			return -1;
+		}
 	}
 
-	rc = spdk_net_get_address_string((struct sockaddr *)&sa, caddr, clen);
-	if (rc != 0) {
-		SPDK_ERRLOG("spdk_net_get_address_string() failed (errno=%d)\n", rc);
-		return -1;
+	if (caddr) {
+		rc = spdk_net_get_address_string((struct sockaddr *)&sa, caddr, clen);
+		if (rc != 0) {
+			SPDK_ERRLOG("spdk_net_get_address_string() failed (errno=%d)\n", rc);
+			return -1;
+		}
 	}
 
 	if (cport) {

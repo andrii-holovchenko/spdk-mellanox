@@ -349,12 +349,12 @@ void spdk_sock_get_default_opts(struct spdk_sock_opts *opts);
  * Get client and server addresses of the given socket.
  *
  * \param sock Socket to get address.
- * \param saddr A pointer to the buffer to hold the address of server.
+ * \param saddr A pointer (may be NULL) to the buffer to hold the address of server.
  * \param slen Length of the buffer 'saddr'.
- * \param sport A pointer(May be NULL) to the buffer to hold the port info of server.
- * \param caddr A pointer to the buffer to hold the address of client.
+ * \param sport A pointer (may be NULL) to the buffer to hold the port info of server.
+ * \param caddr A pointer (may be NULL) to the buffer to hold the address of client.
  * \param clen Length of the buffer 'caddr'.
- * \param cport A pointer(May be NULL) to the buffer to hold the port info of server.
+ * \param cport A pointer (may be NULL) to the buffer to hold the port info of server.
  *
  * \return 0 on success, -1 on failure.
  */
