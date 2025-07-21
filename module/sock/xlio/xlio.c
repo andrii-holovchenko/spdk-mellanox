@@ -458,6 +458,22 @@ retry:
 	return &sock->base;
 }
 
+static struct spdk_mem_map *
+xlio_sock_get_mem_map(struct spdk_xlio_sock *sock)
+{
+	struct ibv_pd *pd;
+
+	if (g_mem_map != NULL) {
+		return g_mem_map;
+	}
+
+	/* This is the first socket. We can finally discover the protection domain. */
+	pd = xlio_socket_get_pd(sock->xlio_sock);
+	assert(pd != NULL);
+
+	return spdk_mem_map_alloc(0, &g_mem_map_ops, pd);
+}
+
 static struct spdk_sock *
 xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 		  struct spdk_sock_opts *opts)
@@ -581,6 +597,9 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 		free(sock);
 		return NULL;
 	}
+
+	sock->map = xlio_sock_get_mem_map(sock);
+	assert(sock->map);
 
 	return &sock->base;
 }
@@ -1040,7 +1059,6 @@ spdk_xlio_socket_accept_cb(xlio_socket_t xlio_sock, xlio_socket_t parent,
 	struct spdk_xlio_sock *listen_sock = (struct spdk_xlio_sock *)parent_userdata_sq;
 	struct spdk_xlio_sock_group *group;
 	struct spdk_xlio_sock *sock;
-	struct ibv_pd *pd;
 	int rc;
 
 	group = listen_sock->group;
@@ -1062,16 +1080,8 @@ spdk_xlio_socket_accept_cb(xlio_socket_t xlio_sock, xlio_socket_t parent,
 		return;
 	}
 
-	if (g_mem_map == NULL) {
-		/* This is the first accepted socket. We can finally discover the protection domain. */
-		pd = xlio_socket_get_pd(xlio_sock);
-		assert(pd != NULL);
-
-		g_mem_map = spdk_mem_map_alloc(0, &g_mem_map_ops, pd);
-		assert(g_mem_map != NULL);
-	}
-
-	sock->map = g_mem_map;
+	sock->map = xlio_sock_get_mem_map(sock);
+	assert(sock->map != NULL);
 
 	sock->events.accept = true;
 	STAILQ_INSERT_TAIL(&group->pending_accept, sock, link);
