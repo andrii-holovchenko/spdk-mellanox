@@ -314,6 +314,15 @@ size_t
 spdk_iov_xfer_to_buf(struct spdk_iov_xfer *ix, const void *buf, size_t buf_len);
 
 /**
+ * Checks whether the given iovec iterator has advanced through the whole iovec array.
+ */
+static inline bool
+spdk_iov_xfer_done(const struct spdk_iov_xfer *ix)
+{
+	return ix->cur_iov_idx == ix->iovcnt;
+}
+
+/**
  * Copy iovs contents to buf through memcpy.
  */
 void spdk_copy_iovs_to_buf(void *buf, size_t buf_len, struct iovec *iovs,
