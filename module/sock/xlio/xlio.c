@@ -33,7 +33,8 @@ struct spdk_xlio_stream_segment {
 };
 
 struct spdk_xlio_domain {
-	struct spdk_mem_map *map;
+	struct spdk_mem_map		*map;
+	struct spdk_memory_domain	*domain;
 };
 
 struct spdk_xlio_sock {
@@ -308,6 +309,14 @@ xlio_sock_get_numa_id(struct spdk_sock *sock)
 	return SPDK_ENV_NUMA_ID_ANY;
 }
 
+static struct spdk_memory_domain *
+xlio_sock_get_memory_domain(struct spdk_sock *_sock)
+{
+	struct spdk_xlio_sock *sock = __xlio_sock(_sock);
+
+	return sock->domain->domain;
+}
+
 static int
 xlio_sock_set_recvbuf(struct spdk_sock *_sock, int sz)
 {
@@ -469,14 +478,32 @@ static struct spdk_xlio_domain *
 xlio_sock_create_domain(struct ibv_pd *pd)
 {
 	struct spdk_xlio_domain *domain;
+	struct spdk_memory_domain_rdma_ctx rctx = {
+		.size = SPDK_SIZEOF(&rctx, qp),
+		.ibv_pd = pd,
+	};
+	struct spdk_memory_domain_ctx ctx = {
+		.size = SPDK_SIZEOF(&ctx, user_ctx_size),
+		.user_ctx = &rctx,
+		.user_ctx_size = SPDK_SIZEOF(&rctx, qp),
+	};
+	int rc;
 
 	domain = calloc(1, sizeof(*domain));
 	if (domain == NULL) {
 		return NULL;
 	}
 
+	rc = spdk_memory_domain_create(&domain->domain, SPDK_DMA_DEVICE_TYPE_RDMA, &ctx, "xlio");
+	if (rc != 0) {
+		SPDK_ERRLOG("Failed to create memory domain: %s\n", spdk_strerror(-rc));
+		free(domain);
+		return NULL;
+	}
+
 	domain->map = spdk_mem_map_alloc(0, &g_mem_map_ops, pd);
 	if (domain->map == NULL) {
+		spdk_memory_domain_destroy(domain->domain);
 		free(domain);
 		return NULL;
 	}
@@ -1312,6 +1339,7 @@ static struct spdk_net_impl g_xlio_net_impl = {
 	.getaddr	= xlio_sock_getaddr,
 	.get_interface_name = xlio_sock_get_interface_name,
 	.get_numa_id	= xlio_sock_get_numa_id,
+	.get_memory_domain = xlio_sock_get_memory_domain,
 	.connect	= xlio_sock_connect,
 	.listen		= xlio_sock_listen,
 	.accept		= xlio_sock_accept,

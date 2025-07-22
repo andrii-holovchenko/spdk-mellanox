@@ -135,7 +135,7 @@ DEPDIRS-env_dpdk_rpc := $(JSON_LIBS)
 # module/sock
 DEPDIRS-sock_posix := log sock util trace
 DEPDIRS-sock_uring := log sock util trace
-DEPDIRS-sock_xlio := log sock trace util xlio
+DEPDIRS-sock_xlio := dma log sock trace util xlio
 
 # module/scheduler
 DEPDIRS-scheduler_dynamic := event log thread util json
