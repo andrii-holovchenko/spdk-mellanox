@@ -420,7 +420,6 @@ xlio_sock_listen(const char *ip, int port, struct spdk_sock_group_impl *_group,
 	if (rc != 0) {
 		SPDK_ERRLOG("getaddrinfo() failed %s (%d)\n", gai_strerror(rc), rc);
 		xlio_socket_destroy(sock->xlio_sock);
-		free(sock);
 		return NULL;
 	}
 
@@ -457,7 +456,6 @@ retry:
 
 	if (rc < 0) {
 		xlio_socket_destroy(sock->xlio_sock);
-		free(sock);
 		return NULL;
 	}
 
@@ -536,7 +534,6 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 			SPDK_ERRLOG("getaddrinfo() failed %s (%d)\n",
 				    rc != 0 ? gai_strerror(rc) : "", rc);
 			xlio_socket_destroy(sock->xlio_sock);
-			free(sock);
 			return NULL;
 		}
 
@@ -546,7 +543,6 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 				    src_addr ? src_addr : "", portnum);
 			freeaddrinfo(src_ai);
 			xlio_socket_destroy(sock->xlio_sock);
-			free(sock);
 			return NULL;
 		}
 
@@ -574,7 +570,6 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 	if (rc != 0) {
 		SPDK_ERRLOG("getaddrinfo() failed %s (%d)\n", gai_strerror(rc), rc);
 		xlio_socket_destroy(sock->xlio_sock);
-		free(sock);
 		return NULL;
 	}
 
@@ -600,7 +595,6 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 
 	if (rc < 0) {
 		xlio_socket_destroy(sock->xlio_sock);
-		free(sock);
 		return NULL;
 	}
 
@@ -1082,7 +1076,6 @@ spdk_xlio_socket_accept_cb(xlio_socket_t xlio_sock, xlio_socket_t parent,
 	rc = xlio_socket_update(xlio_sock, 0, (uintptr_t)sock);
 	if (rc != 0) {
 		xlio_socket_destroy(xlio_sock);
-		free(sock);
 		return;
 	}
 
