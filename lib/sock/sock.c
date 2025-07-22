@@ -1333,6 +1333,16 @@ spdk_sock_get_caps(struct spdk_sock *sock, struct spdk_sock_caps *caps)
 	return -ENOTSUP;
 }
 
+struct spdk_memory_domain *
+spdk_sock_get_memory_domain(struct spdk_sock *sock)
+{
+	if (sock->net_impl->get_memory_domain) {
+		return sock->net_impl->get_memory_domain(sock);
+	}
+
+	return NULL;
+}
+
 void
 spdk_sock_initialize(void)
 {

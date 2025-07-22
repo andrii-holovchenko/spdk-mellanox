@@ -13,6 +13,7 @@
 
 #include "spdk/stdinc.h"
 
+#include "spdk/dma.h"
 #include "spdk/queue.h"
 #include "spdk/json.h"
 #include "spdk/assert.h"
@@ -801,6 +802,16 @@ ssize_t spdk_sock_recv_zcopy(struct spdk_sock *sock, size_t len, struct spdk_soc
  * \return 0 on success, -1 on failure.
  */
 int spdk_sock_free_bufs(struct spdk_sock *sock, struct spdk_sock_buf *sock_buf);
+
+/**
+ * Get memory domain associated with the socketo or NULL if the socket module doens't support memory
+ * domains.
+ *
+ * \param sock Socket.
+ *
+ * \return Memory domain or NULL.
+ */
+struct spdk_memory_domain *spdk_sock_get_memory_domain(struct spdk_sock *sock);
 
 /**
  * Initialize socket layer.
