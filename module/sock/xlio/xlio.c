@@ -32,13 +32,16 @@ struct spdk_xlio_stream_segment {
 	STAILQ_ENTRY(spdk_xlio_stream_segment)	link;
 };
 
+struct spdk_xlio_domain {
+	struct spdk_mem_map *map;
+};
+
 struct spdk_xlio_sock {
 	struct spdk_sock		base;
 	xlio_socket_t			xlio_sock;
 
 	struct spdk_xlio_sock_group	*group;
-
-	struct spdk_mem_map		*map;
+	struct spdk_xlio_domain		*domain;
 
 	/* The current status code of this socket. In practice the following codes will
 	 * appear:
@@ -93,7 +96,7 @@ static struct spdk_sock_impl_opts g_xlio_impl_opts = {
 };
 
 /* TODO: Since this is a PoC, we'll only support one adapter and store this globally. */
-static struct spdk_mem_map *g_mem_map = NULL;
+static struct spdk_xlio_domain *g_domain = NULL;
 
 static int
 spdk_xlio_mem_notify(void *cb_ctx, struct spdk_mem_map *map,
@@ -462,20 +465,39 @@ retry:
 	return &sock->base;
 }
 
-static struct spdk_mem_map *
-xlio_sock_get_mem_map(struct spdk_xlio_sock *sock)
+static struct spdk_xlio_domain *
+xlio_sock_create_domain(struct ibv_pd *pd)
+{
+	struct spdk_xlio_domain *domain;
+
+	domain = calloc(1, sizeof(*domain));
+	if (domain == NULL) {
+		return NULL;
+	}
+
+	domain->map = spdk_mem_map_alloc(0, &g_mem_map_ops, pd);
+	if (domain->map == NULL) {
+		free(domain);
+		return NULL;
+	}
+
+	return domain;
+}
+
+static struct spdk_xlio_domain *
+xlio_sock_get_domain(struct spdk_xlio_sock *sock)
 {
 	struct ibv_pd *pd;
 
-	if (g_mem_map != NULL) {
-		return g_mem_map;
+	if (g_domain == NULL) {
+		/* This is the first socket. We can finally discover the protection domain. */
+		pd = xlio_socket_get_pd(sock->xlio_sock);
+		assert(pd != NULL);
+
+		g_domain = xlio_sock_create_domain(pd);
 	}
 
-	/* This is the first socket. We can finally discover the protection domain. */
-	pd = xlio_socket_get_pd(sock->xlio_sock);
-	assert(pd != NULL);
-
-	return spdk_mem_map_alloc(0, &g_mem_map_ops, pd);
+	return g_domain;
 }
 
 static struct spdk_sock *
@@ -598,8 +620,8 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 		return NULL;
 	}
 
-	sock->map = xlio_sock_get_mem_map(sock);
-	assert(sock->map);
+	sock->domain = xlio_sock_get_domain(sock);
+	assert(sock->domain);
 
 	return &sock->base;
 }
@@ -839,6 +861,7 @@ static void
 xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 {
 	struct spdk_xlio_sock *sock = __xlio_sock(_sock);
+	struct spdk_mem_map *map = sock->domain->map;
 	int rc, i;
 	struct xlio_socket_send_attr attr = {
 		.flags = 0, /* The default is zero copy */
@@ -861,7 +884,7 @@ xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 		iov = SPDK_SOCK_REQUEST_IOV(req, i);
 		size = (uint64_t)iov->iov_len;
 
-		mr_tmp = (struct ibv_mr *)spdk_mem_map_translate(sock->map, (uint64_t)iov->iov_base, &size);
+		mr_tmp = (struct ibv_mr *)spdk_mem_map_translate(map, (uint64_t)iov->iov_base, &size);
 		assert(mr_tmp != NULL);
 
 		if (mr == NULL) {
@@ -892,7 +915,7 @@ xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 		iov = SPDK_SOCK_REQUEST_IOV(req, i);
 		size = (uint64_t)iov->iov_len;
 
-		mr = (struct ibv_mr *)spdk_mem_map_translate(sock->map, (uint64_t)iov->iov_base, &size);
+		mr = (struct ibv_mr *)spdk_mem_map_translate(map, (uint64_t)iov->iov_base, &size);
 		assert(mr != NULL);
 		assert(size == iov->iov_len);
 
@@ -1079,8 +1102,8 @@ spdk_xlio_socket_accept_cb(xlio_socket_t xlio_sock, xlio_socket_t parent,
 		return;
 	}
 
-	sock->map = xlio_sock_get_mem_map(sock);
-	assert(sock->map != NULL);
+	sock->domain = xlio_sock_get_domain(sock);
+	assert(sock->domain != NULL);
 
 	sock->events.accept = true;
 	STAILQ_INSERT_TAIL(&group->pending_accept, sock, link);
