@@ -900,35 +900,33 @@ xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 		.mkey = 0, /* This gets filled in based on the lookup below */
 		.userdata_op = 0
 	};
-	struct ibv_mr *mr, *mr_tmp;
+	struct ibv_mr *mr;
 	struct iovec *iov;
+	uint32_t mkey;
 
 	if (sock->rc != 0) {
 		spdk_sock_request_complete(&sock->base, req, sock->rc);
 		return;
 	}
 
-	mr = NULL;
-	mr_tmp = NULL;
 	for (i = 0; i < req->iovcnt; i++) {
 		uint64_t size;
 
 		iov = SPDK_SOCK_REQUEST_IOV(req, i);
 		size = (uint64_t)iov->iov_len;
 
-		mr_tmp = (struct ibv_mr *)spdk_mem_map_translate(map, (uint64_t)iov->iov_base, &size);
-		assert(mr_tmp != NULL);
+		mr = (struct ibv_mr *)spdk_mem_map_translate(map, (uint64_t)iov->iov_base, &size);
+		assert(mr != NULL);
 
-		if (mr == NULL) {
-			mr = mr_tmp;
-		} else if (mr->lkey != mr_tmp->lkey) {
-			mr = NULL;
+		if (i == 0) {
+			mkey = mr->lkey;
+		} else if (mkey != mr->lkey) {
 			break;
 		}
 	}
 
-	if (mr != NULL) {
-		attr.mkey = mr->lkey;
+	if (i == req->iovcnt) {
+		attr.mkey = mkey;
 		attr.userdata_op = (uintptr_t)req; /* We'll get a completion notification when this finishes */
 		iov = SPDK_SOCK_REQUEST_IOV(req, 0);
 		rc = xlio_socket_sendv(sock->xlio_sock, iov, req->iovcnt, &attr);
