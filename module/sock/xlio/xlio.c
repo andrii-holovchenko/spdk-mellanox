@@ -371,30 +371,15 @@ xlio_sock_set_sendbuf(struct spdk_sock *_sock, int sz)
 	return 0;
 }
 
-static struct spdk_sock *
-xlio_sock_listen(const char *ip, int port, struct spdk_sock_group_impl *_group,
-		 struct spdk_sock_opts *opts)
+static struct spdk_xlio_sock *
+alloc_xlio_sock(struct spdk_xlio_sock_group *group)
 {
-	struct spdk_xlio_sock_group *group = __xlio_group(_group);
 	struct spdk_xlio_sock *sock;
-	struct xlio_socket_attr attr;
-	struct spdk_sock_impl_opts impl_opts;
-	char buf[MAX_TMPBUF];
-	char portnum[PORTNUMLEN];
-	char *p;
-	struct addrinfo hints, *res, *res0;
+	struct xlio_socket_attr attr = {};
 	int rc;
-
-	if (ip == NULL) {
-		return NULL;
-	}
-
-	assert(opts != NULL);
-	_opts_get_impl_opts(opts, &impl_opts, &g_xlio_impl_opts);
 
 	sock = calloc(1, sizeof(*sock));
 	if (sock == NULL) {
-		SPDK_ERRLOG("sock allocation failed\n");
 		return NULL;
 	}
 
@@ -405,13 +390,40 @@ xlio_sock_listen(const char *ip, int port, struct spdk_sock_group_impl *_group,
 	attr.domain = AF_INET;
 	attr.group = group->xlio_group;
 	attr.userdata_sq = (uintptr_t)sock;
-
 	rc = xlio_socket_create(&attr, &sock->xlio_sock);
 	if (rc != 0) {
+		SPDK_ERRLOG("Failed to create xlio socket: %s\n", spdk_strerror(-rc));
 		free(sock);
 		return NULL;
 	}
 
+	return sock;
+}
+
+static struct spdk_sock *
+xlio_sock_listen(const char *ip, int port, struct spdk_sock_group_impl *_group,
+		 struct spdk_sock_opts *opts)
+{
+	struct spdk_xlio_sock_group *group = __xlio_group(_group);
+	struct spdk_xlio_sock *sock;
+	struct spdk_sock_impl_opts impl_opts;
+	char buf[MAX_TMPBUF];
+	char portnum[PORTNUMLEN];
+	char *p;
+	struct addrinfo hints, *res, *res0;
+	int rc;
+
+	assert(opts != NULL);
+	_opts_get_impl_opts(opts, &impl_opts, &g_xlio_impl_opts);
+
+	sock = alloc_xlio_sock(group);
+	if (sock == NULL) {
+		return NULL;
+	}
+
+	if (ip == NULL) {
+		return NULL;
+	}
 	if (ip[0] == '[') {
 		snprintf(buf, sizeof(buf), "%s", ip + 1);
 		p = strchr(buf, ']');
@@ -533,7 +545,6 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 {
 	struct spdk_xlio_sock_group *group = __xlio_group(_group);
 	struct spdk_xlio_sock *sock;
-	struct xlio_socket_attr attr;
 	struct spdk_sock_impl_opts impl_opts;
 	char buf[MAX_TMPBUF];
 	char portnum[PORTNUMLEN];
@@ -550,22 +561,8 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 	assert(opts != NULL);
 	_opts_get_impl_opts(opts, &impl_opts, &g_xlio_impl_opts);
 
-	sock = calloc(1, sizeof(*sock));
+	sock = alloc_xlio_sock(group);
 	if (sock == NULL) {
-		return NULL;
-	}
-
-	sock->group = group;
-	STAILQ_INIT(&sock->pending_stream);
-
-	attr.flags = 0;
-	attr.domain = AF_INET;
-	attr.group = group->xlio_group;
-	attr.userdata_sq = (uintptr_t)sock;
-
-	rc = xlio_socket_create(&attr, &sock->xlio_sock);
-	if (rc != 0) {
-		free(sock);
 		return NULL;
 	}
 
