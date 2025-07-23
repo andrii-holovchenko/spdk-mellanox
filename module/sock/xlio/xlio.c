@@ -376,7 +376,7 @@ alloc_xlio_sock(struct spdk_xlio_sock_group *group)
 {
 	struct spdk_xlio_sock *sock;
 	struct xlio_socket_attr attr = {};
-	int rc;
+	int rc, val;
 
 	sock = calloc(1, sizeof(*sock));
 	if (sock == NULL) {
@@ -394,6 +394,14 @@ alloc_xlio_sock(struct spdk_xlio_sock_group *group)
 	if (rc != 0) {
 		SPDK_ERRLOG("Failed to create xlio socket: %s\n", spdk_strerror(-rc));
 		free(sock);
+		return NULL;
+	}
+
+	val = 1;
+	rc = xlio_socket_setsockopt(sock->xlio_sock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof val);
+	if (rc != 0) {
+		SPDK_ERRLOG("Failed to set SO_REUSEADDR: %s\n", spdk_strerror(-rc));
+		xlio_socket_destroy(sock->xlio_sock);
 		return NULL;
 	}
 
