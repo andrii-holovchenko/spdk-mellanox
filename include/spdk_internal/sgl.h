@@ -17,6 +17,7 @@ struct spdk_iov_sgl {
 	int             iovcnt;
 	uint32_t        iov_offset;
 	uint32_t        total_size;
+	int		max_iovcnt;
 };
 
 /**
@@ -34,6 +35,7 @@ spdk_iov_sgl_init(struct spdk_iov_sgl *s, struct iovec *iov, int iovcnt,
 {
 	s->iov = iov;
 	s->iovcnt = iovcnt;
+	s->max_iovcnt = iovcnt;
 	s->iov_offset = iov_offset;
 	s->total_size = 0;
 }
@@ -90,6 +92,20 @@ spdk_iov_sgl_append(struct spdk_iov_sgl *s, uint8_t *data, uint32_t data_len)
 	}
 
 	return true;
+}
+
+/**
+ * Return the number of iovs filled with data.
+ *
+ * \param s spdk_iov_sgl object.
+ *
+ * \return Number of iovs filled with data.
+ */
+static inline int
+spdk_iov_sgl_iovcnt(struct spdk_iov_sgl *s)
+{
+	assert(s->max_iovcnt >= s->iovcnt);
+	return s->max_iovcnt - s->iovcnt;
 }
 
 #ifdef __cplusplus
