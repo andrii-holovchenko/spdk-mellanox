@@ -36,6 +36,7 @@ struct spdk_xlio_stream_segment {
 struct spdk_xlio_domain {
 	struct spdk_mem_map		*map;
 	struct spdk_memory_domain	*domain;
+	struct ibv_pd			*pd;
 };
 
 struct spdk_xlio_sock {
@@ -527,6 +528,7 @@ xlio_sock_create_domain(struct ibv_pd *pd)
 		return NULL;
 	}
 
+	domain->pd = pd;
 	domain->map = spdk_mem_map_alloc(0, &g_mem_map_ops, pd);
 	if (domain->map == NULL) {
 		spdk_memory_domain_destroy(domain->domain);
@@ -896,8 +898,8 @@ xlio_sock_recv_next(struct spdk_sock *_sock, void **buf, struct spdk_sock_buf_to
 }
 
 static int
-xlio_sock_translate_addr(struct spdk_xlio_sock *sock, void *buf, size_t len,
-			 struct spdk_xlio_translation *translation)
+xlio_sock_translate_mem(struct spdk_xlio_sock *sock, void *buf, size_t len,
+			struct spdk_xlio_translation *translation)
 {
 	struct spdk_mem_map *map = sock->domain->map;
 	struct ibv_mr *mr;
@@ -911,6 +913,50 @@ xlio_sock_translate_addr(struct spdk_xlio_sock *sock, void *buf, size_t len,
 	translation->addr = buf;
 
 	return 0;
+}
+
+static int
+xlio_sock_translate_domain(struct spdk_xlio_sock *sock, void *buf, size_t len,
+			   struct spdk_memory_domain *domain, void *domain_ctx,
+			   struct spdk_xlio_translation *translation)
+{
+	struct ibv_qp qp = {
+		.pd = sock->domain->pd,
+	};
+	struct spdk_memory_domain_translation_ctx ctx = {
+		.size = SPDK_SIZEOF(&ctx, rdma),
+		.rdma.ibv_qp = &qp,
+	};
+	struct spdk_memory_domain_translation_result result = {
+		.size = SPDK_SIZEOF(&result, rdma),
+	};
+	int rc;
+
+	rc = spdk_memory_domain_translate_data(domain, domain_ctx, sock->domain->domain, &ctx,
+					       buf, len, &result);
+	if (spdk_unlikely(rc != 0)) {
+		SPDK_ERRLOG("failed to translate address range %p-%p: %s\n", buf, buf + len,
+			    spdk_strerror(-rc));
+		return -EFAULT;
+	}
+
+	assert(result.iov_count == 1);
+	translation->addr = result.iov.iov_base;
+	translation->mkey = result.rdma.lkey;
+
+	return 0;
+}
+
+static int
+xlio_sock_translate_addr(struct spdk_xlio_sock *sock, void *buf, size_t len,
+			 struct spdk_memory_domain *domain, void *domain_ctx,
+			 struct spdk_xlio_translation *result)
+{
+	if (domain != NULL) {
+		return xlio_sock_translate_domain(sock, buf, len, domain, domain_ctx, result);
+	} else {
+		return xlio_sock_translate_mem(sock, buf, len, result);
+	}
 }
 
 static void
@@ -935,7 +981,8 @@ xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 	for (i = 0; i < req->iovcnt; i++) {
 		iov = SPDK_SOCK_REQUEST_IOV(req, i);
 
-		rc = xlio_sock_translate_addr(sock, iov->iov_base, iov->iov_len, &translation);
+		rc = xlio_sock_translate_addr(sock, iov->iov_base, iov->iov_len,
+					      req->domain, req->domain_ctx, &translation);
 		if (spdk_unlikely(rc != 0)) {
 			spdk_sock_request_complete(&sock->base, req, rc);
 			return;
@@ -965,7 +1012,8 @@ xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 	for (i = 0; i < req->iovcnt; i++) {
 		iov = SPDK_SOCK_REQUEST_IOV(req, i);
 
-		rc = xlio_sock_translate_addr(sock, iov->iov_base, iov->iov_len, &translation);
+		rc = xlio_sock_translate_addr(sock, iov->iov_base, iov->iov_len,
+					      req->domain, req->domain_ctx, &translation);
 		if (spdk_unlikely(rc != 0)) {
 			spdk_sock_request_complete(&sock->base, req, rc);
 			return;
