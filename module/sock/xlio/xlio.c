@@ -9,6 +9,7 @@
 
 #include <infiniband/verbs.h>
 
+#include "spdk/likely.h"
 #include "spdk/log.h"
 #include "spdk/sock.h"
 #include "spdk/util.h"
@@ -75,6 +76,11 @@ struct spdk_xlio_sock_group {
 	STAILQ_HEAD(, spdk_xlio_sock)	pending_rx;
 
 	STAILQ_HEAD(, spdk_xlio_stream_segment) segment_pool;
+};
+
+struct spdk_xlio_translation {
+	void		*addr;
+	uint32_t	mkey;
 };
 
 static struct spdk_sock_impl_opts g_xlio_impl_opts = {
@@ -889,20 +895,37 @@ xlio_sock_recv_next(struct spdk_sock *_sock, void **buf, struct spdk_sock_buf_to
 	return segment->len;
 }
 
+static int
+xlio_sock_translate_addr(struct spdk_xlio_sock *sock, void *buf, size_t len,
+			 struct spdk_xlio_translation *translation)
+{
+	struct spdk_mem_map *map = sock->domain->map;
+	struct ibv_mr *mr;
+	uint64_t size = len;
+
+	mr = (struct ibv_mr *)spdk_mem_map_translate(map, (uint64_t)buf, &size);
+	assert(mr != NULL);
+	assert(size == len);
+
+	translation->mkey = mr->lkey;
+	translation->addr = buf;
+
+	return 0;
+}
+
 static void
 xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 {
 	struct spdk_xlio_sock *sock = __xlio_sock(_sock);
-	struct spdk_mem_map *map = sock->domain->map;
+	struct spdk_xlio_translation translation;
 	int rc, i;
 	struct xlio_socket_send_attr attr = {
 		.flags = 0, /* The default is zero copy */
 		.mkey = 0, /* This gets filled in based on the lookup below */
 		.userdata_op = 0
 	};
-	struct ibv_mr *mr;
 	struct iovec *iov;
-	uint32_t mkey;
+	uint32_t mkey = 0;
 
 	if (sock->rc != 0) {
 		spdk_sock_request_complete(&sock->base, req, sock->rc);
@@ -910,22 +933,22 @@ xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 	}
 
 	for (i = 0; i < req->iovcnt; i++) {
-		uint64_t size;
-
 		iov = SPDK_SOCK_REQUEST_IOV(req, i);
-		size = (uint64_t)iov->iov_len;
 
-		mr = (struct ibv_mr *)spdk_mem_map_translate(map, (uint64_t)iov->iov_base, &size);
-		assert(mr != NULL);
+		rc = xlio_sock_translate_addr(sock, iov->iov_base, iov->iov_len, &translation);
+		if (spdk_unlikely(rc != 0)) {
+			spdk_sock_request_complete(&sock->base, req, rc);
+			return;
+		}
 
 		if (i == 0) {
-			mkey = mr->lkey;
-		} else if (mkey != mr->lkey) {
+			mkey = translation.mkey;
+		} else if (mkey != translation.mkey || iov->iov_base != translation.addr) {
 			break;
 		}
 	}
 
-	if (i == req->iovcnt) {
+	if (i > 0 && i == req->iovcnt) {
 		attr.mkey = mkey;
 		attr.userdata_op = (uintptr_t)req; /* We'll get a completion notification when this finishes */
 		iov = SPDK_SOCK_REQUEST_IOV(req, 0);
@@ -940,22 +963,20 @@ xlio_sock_writev_async(struct spdk_sock *_sock, struct spdk_sock_request *req)
 
 	/* Split memory keys so we need to do a separate send for each iov. */
 	for (i = 0; i < req->iovcnt; i++) {
-		uint64_t size;
-
 		iov = SPDK_SOCK_REQUEST_IOV(req, i);
-		size = (uint64_t)iov->iov_len;
 
-		mr = (struct ibv_mr *)spdk_mem_map_translate(map, (uint64_t)iov->iov_base, &size);
-		assert(mr != NULL);
-		assert(size == iov->iov_len);
+		rc = xlio_sock_translate_addr(sock, iov->iov_base, iov->iov_len, &translation);
+		if (spdk_unlikely(rc != 0)) {
+			spdk_sock_request_complete(&sock->base, req, rc);
+			return;
+		}
 
-		attr.mkey = mr->lkey;
-
+		attr.mkey = translation.mkey;
 		if (i == req->iovcnt - 1) {
 			attr.userdata_op = (uintptr_t)req; /* We'll get a completion notification when this finishes */
 		}
 
-		rc = xlio_socket_send(sock->xlio_sock, iov->iov_base, iov->iov_len, &attr);
+		rc = xlio_socket_send(sock->xlio_sock, translation.addr, iov->iov_len, &attr);
 		if (rc < 0) {
 			spdk_sock_request_complete(&sock->base, req, rc);
 			return;
