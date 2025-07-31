@@ -366,13 +366,9 @@ struct spdk_nvmf_rdma_qpair {
 
 	STAILQ_HEAD(, spdk_nvmf_rdma_request)	pending_rdma_send_queue;
 
-	/* Number of requests not in the free state */
-	uint32_t				qd;
-
 	bool					ibv_in_error_state;
 	bool					start_accel_sequence;
 	bool					in_destroy;
-
 	RB_ENTRY(spdk_nvmf_rdma_qpair)		node;
 
 	STAILQ_ENTRY(spdk_nvmf_rdma_qpair)	recv_link;
@@ -878,14 +874,14 @@ nvmf_rdma_qpair_destroy(struct spdk_nvmf_rdma_qpair *rqpair)
 
 	spdk_trace_record(TRACE_RDMA_QP_DESTROY, 0, 0, (uintptr_t)rqpair);
 
-	if (rqpair->qd != 0) {
+	if (rqpair->qpair.queue_depth != 0) {
 		struct spdk_nvmf_qpair *qpair = &rqpair->qpair;
 		struct spdk_nvmf_rdma_transport	*rtransport = SPDK_CONTAINEROF(qpair->transport,
 				struct spdk_nvmf_rdma_transport, transport);
 		struct spdk_nvmf_rdma_request *req;
 		uint32_t i, max_req_count = 0;
 
-		SPDK_WARNLOG("Destroying qpair when queue depth is %d\n", rqpair->qd);
+		SPDK_WARNLOG("Destroying qpair when queue depth is %d\n", rqpair->qpair.queue_depth);
 
 		if (rqpair->srq == NULL) {
 			nvmf_rdma_dump_qpair_contents(rqpair);
@@ -903,7 +899,7 @@ nvmf_rdma_qpair_destroy(struct spdk_nvmf_rdma_qpair *rqpair)
 				nvmf_rdma_request_process(rtransport, req);
 			}
 		}
-		assert(rqpair->qd == 0);
+		assert(rqpair->qpair.queue_depth == 0);
 	}
 
 	if (rqpair->poller) {
@@ -2087,7 +2083,6 @@ _nvmf_rdma_request_free(struct spdk_nvmf_rdma_request *rdma_req,
 		rdma_req->fused_pair = NULL;
 	}
 	memset(&rdma_req->req.dif, 0, sizeof(rdma_req->req.dif));
-	rqpair->qd--;
 
 	STAILQ_INSERT_HEAD(&rqpair->resources->free_queue, rdma_req, state_link);
 	rqpair->qpair.queue_depth--;
@@ -3811,9 +3806,6 @@ nvmf_rdma_qpair_process_pending(struct spdk_nvmf_rdma_transport *rtransport,
 
 		if (rqpair->srq != NULL) {
 			rdma_req->req.qpair = &rdma_req->recv->qpair->qpair;
-			rdma_req->recv->qpair->qd++;
-		} else {
-			rqpair->qd++;
 		}
 
 		rdma_req->receive_tsc = rdma_req->recv->receive_tsc;
