@@ -30,6 +30,7 @@
 #define UT_RMEM_POOL_ENTRY ((struct spdk_rmem_entry *)0xDEABDEAB)
 
 DEFINE_STUB_V(spdk_fsdev_close, (struct spdk_fsdev_desc *desc));
+DEFINE_STUB(spdk_fsdev_get_supported_fuse_opcodes, uint64_t, (struct spdk_fsdev *fsdev), 0);
 DEFINE_STUB(spdk_fsdev_desc_get_fsdev, struct spdk_fsdev *, (struct spdk_fsdev_desc *desc), NULL);
 DEFINE_STUB(spdk_fsdev_get_opts, int, (struct spdk_fsdev_opts *opts, size_t opts_size), 0);
 DEFINE_STUB(spdk_fsdev_reset, int, (struct spdk_fsdev_desc *desc, spdk_fsdev_reset_completion_cb cb,

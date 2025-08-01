@@ -257,6 +257,11 @@ struct spdk_fuse_dispatcher {
 	uint64_t reserved : 63;
 
 	/**
+	 * FUSE opcodes supported using SPDK_FSDEV_IO_FUSE.
+	 */
+	uint64_t supported_fuse_opcodes;
+
+	/**
 	 * fsdev descriptor
 	 */
 	struct spdk_fsdev_desc *desc;
@@ -2390,6 +2395,12 @@ fuse_dispatcher_fill_init(struct fuse_io *fuse_io)
 		return -EPROTO;
 	}
 
+	if (disp->supported_fuse_opcodes != 0 && disp->proto_minor < 31) {
+		SPDK_ERRLOG("INIT: unsupported minor protocol version: %" PRIu32 " for using fuse\n",
+			    disp->proto_minor);
+		return -EPROTO;
+	}
+
 	/* NOTE: it seems that libfuse has made assumption that FUSE_KERNEL_VERSION will never be changed again,
 	 * and proto_minor will determine all versioning forever (see do_init() in libfuse/lib/fuse_lowlevel.c).
 	 * As libfuse is considered the de facto standard, we just follow the same logic here.
@@ -3961,6 +3972,7 @@ spdk_fuse_dispatcher_create(struct spdk_fsdev_desc *desc, bool recovery_mode,
 			    void *notify_reply_cb_arg)
 {
 	struct spdk_fuse_dispatcher *disp;
+	struct spdk_fsdev *fsdev;
 
 	disp = calloc(1, sizeof(*disp));
 	if (!disp) {
@@ -3969,6 +3981,8 @@ spdk_fuse_dispatcher_create(struct spdk_fsdev_desc *desc, bool recovery_mode,
 	}
 
 	disp->fuse_arch = SPDK_FUSE_ARCH_NATIVE;
+	fsdev = spdk_fsdev_desc_get_fsdev(desc);
+	disp->supported_fuse_opcodes = spdk_fsdev_get_supported_fuse_opcodes(fsdev);
 	disp->desc = desc;
 	disp->notify_reply_cb = notify_reply_cb;
 	disp->notify_reply_cb_arg = notify_reply_cb_arg;
