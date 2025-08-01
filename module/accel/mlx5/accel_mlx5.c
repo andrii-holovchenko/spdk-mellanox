@@ -3316,19 +3316,11 @@ accel_mlx5_dif_task_process_one_req(struct accel_mlx5_task *mlx5_task)
 		return rc;
 	}
 
-	if (mlx5_task->mlx5_opcode == ACCEL_MLX5_OPC_DIF_GENERATE_COPY) {
-		rc = accel_mlx5_dif_task_configure_umr(mlx5_task,
-						       SPDK_MLX5_SIG_TYPE_NONE,
-						       SPDK_MLX5_SIG_TYPE_T10DIF,
-						       sges.dst_sge, sges.dst_sge_count,
-						       mlx5_task->mkeys[0], dst_len);
-	} else {
-		rc = accel_mlx5_dif_task_configure_umr(mlx5_task,
-						       SPDK_MLX5_SIG_TYPE_NONE,
-						       SPDK_MLX5_SIG_TYPE_T10DIF,
-						       sges.src_sge, sges.src_sge_count,
-						       mlx5_task->mkeys[0], src_len);
-	}
+	rc = accel_mlx5_dif_task_configure_umr(mlx5_task,
+					       SPDK_MLX5_SIG_TYPE_NONE,
+					       SPDK_MLX5_SIG_TYPE_T10DIF,
+					       sges.dst_sge, sges.dst_sge_count,
+					       mlx5_task->mkeys[0], dst_len);
 	if (spdk_unlikely(rc)) {
 		SPDK_ERRLOG("UMR configure failed with %d\n", rc);
 		return rc;
