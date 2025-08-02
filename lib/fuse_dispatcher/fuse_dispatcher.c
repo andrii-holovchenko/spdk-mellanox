@@ -144,6 +144,9 @@ struct fuse_io {
 	struct iov_offs in_offs;
 	struct iov_offs out_offs;
 
+	struct iovec orig_in_iov[2];
+	struct iovec orig_out_iov[1];
+
 	spdk_fuse_dispatcher_submit_cpl_cb cpl_cb;
 	void *cpl_cb_arg;
 	struct spdk_io_channel *ch;
@@ -1166,6 +1169,23 @@ fuse_dispatcher_reset(struct spdk_fuse_dispatcher *disp)
 }
 
 static void
+fuse_dispatcher_passthrough_cpl_cb(void *cb_arg, int status, struct spdk_fsdev_io *fsdev_io)
+{
+	struct fuse_io *fuse_io = cb_arg;
+
+	if (fuse_io->hdr.opcode == FUSE_DESTROY) {
+		fuse_dispatcher_reset(fuse_io->disp);
+	}
+	memcpy(fuse_io->in_iov, fuse_io->orig_in_iov, sizeof(fuse_io->orig_in_iov));
+	if (fuse_io->out_iov != NULL) {
+		memcpy(fuse_io->out_iov, fuse_io->orig_out_iov, sizeof(fuse_io->orig_out_iov));
+	}
+	assert(fsdev_io->u_out.fuse.hdr == NULL || status == fsdev_io->u_out.fuse.hdr->error);
+	assert(spdk_fsdev_io_get_type(fsdev_io) == SPDK_FSDEV_IO_FUSE);
+	fuse_io->cpl_cb(fuse_io->cpl_cb_arg, status);
+}
+
+static void
 fuse_dispatcher_cpl_cb(void *cb_arg, int status, struct spdk_fsdev_io *fsdev_io)
 {
 	struct fuse_io *fuse_io = cb_arg;
@@ -1291,6 +1311,121 @@ static inline void
 fuse_init_fsdev_io(struct fuse_io *fuse_io, enum spdk_fsdev_io_type type)
 {
 	fuse_init_fsdev_io_ex(fuse_io, type, fuse_dispatcher_cpl_cb);
+}
+
+/* FUSE opcodes that define both a command-specific IN header and have IN
+ * payload must return the size of their IN header here. This is used to
+ * adjust the data iov appropriately.
+ */
+static size_t
+fuse_get_in_size(struct fuse_in_header *in_hdr)
+{
+	switch (in_hdr->opcode) {
+	case FUSE_CREATE:
+		return sizeof(struct fuse_create_in);
+	case FUSE_BATCH_FORGET:
+		return sizeof(struct fuse_batch_forget_in);
+	case FUSE_LINK:
+		return sizeof(struct fuse_link_in);
+	case FUSE_MKNOD:
+		return sizeof(struct fuse_mknod_in);
+	case FUSE_MKDIR:
+		return sizeof(struct fuse_mkdir_in);
+	case FUSE_RENAME:
+		return sizeof(struct fuse_rename_in);
+	case FUSE_RENAME2:
+		return sizeof(struct fuse_rename2_in);
+	case FUSE_WRITE:
+		return sizeof(struct fuse_write_in);
+	default:
+		return 0;
+	}
+}
+
+static int
+fuse_dispatcher_fill_fuse(struct fuse_io *fuse_io)
+{
+	struct spdk_fsdev_io *fsdev_io = fuse_to_fsdev_io(fuse_io);
+	struct iovec *in_iov = fuse_io->in_iov;
+	struct iovec *out_iov = fuse_io->out_iov;
+	int in_iovcnt = fuse_io->in_iovcnt;
+	int out_iovcnt = fuse_io->out_iovcnt;
+	struct spdk_fuse_in *in = &fsdev_io->u_in.fuse;
+	struct spdk_fuse_out *out = &fsdev_io->u_out.fuse;
+	struct fuse_in_header *in_hdr;
+	struct fuse_out_header *out_hdr;
+	uint32_t *open_flags;
+	size_t in_size;
+
+	in_hdr = in_iov->iov_base;
+
+	/* We may need to modify the iovs, for example if one iov contains both header
+	 * and payload. For now we just always save off the iovs and restore them later.
+	 * A future optimization could be saving them off only when necessary, but this
+	 * still adds extra bits that need to be checked which may end up being a wash from
+	 * a cacheline perspective.
+	 */
+	memcpy(fuse_io->orig_in_iov, fuse_io->in_iov, sizeof(fuse_io->orig_in_iov));
+
+	in->hdr = in_hdr;
+	if (in_iov->iov_len == sizeof(*in_hdr)) {
+		in_iov++;
+		in_iovcnt--;
+	} else {
+		in_iov->iov_base += sizeof(*in_hdr);
+		in_iov->iov_len -= sizeof(*in_hdr);
+	}
+	in->op.raw = in_iov->iov_base;
+	in_size = fuse_get_in_size(in_hdr);
+	if (in_size > 0) {
+		assert(in_iov->iov_len >= in_size);
+		if (in_iov->iov_len == in_size) {
+			in_iov++;
+			in_iovcnt--;
+		} else {
+			in_iov->iov_base += in_size;
+			in_iov->iov_len -= in_size;
+		}
+	}
+	in->iov = in_iov;
+	in->iovcnt = in_iovcnt;
+
+	/* Done preparing in headers, now move to out headers if they exist. */
+
+	if (out_iov != NULL) {
+		out_hdr = out_iov->iov_base;
+		memcpy(fuse_io->orig_out_iov, fuse_io->out_iov, sizeof(fuse_io->orig_out_iov));
+		out->hdr = out_hdr;
+		if (out_iov->iov_len == sizeof(*out_hdr)) {
+			out_iov++;
+			out_iovcnt--;
+		} else {
+			out_iov->iov_base += sizeof(*out_hdr);
+			out_iov->iov_len -= sizeof(*out_hdr);
+		}
+		out->op.raw = out_iov->iov_base;
+		out->iov = out_iov;
+		out->iovcnt = out_iovcnt;
+	} else {
+		out->hdr = NULL;
+		out->op.raw = NULL;
+		out->iov = NULL;
+		out->iovcnt = 0;
+	}
+
+	fuse_init_fsdev_io_ex(fuse_io, SPDK_FSDEV_IO_FUSE, fuse_dispatcher_passthrough_cpl_cb);
+
+	/* We are responsible for converting the open flags from host to device format before
+	 * passing the command to the fsdev.
+	 */
+	if (in_hdr->opcode == FUSE_OPEN) {
+		open_flags = &in->op.open->flags;
+		fsdev_d2h_open_flags(fuse_io->disp->fuse_arch, *open_flags, open_flags);
+	} else if (in_hdr->opcode == FUSE_CREATE) {
+		open_flags = &in->op.create->flags;
+		fsdev_d2h_open_flags(fuse_io->disp->fuse_arch, *open_flags, open_flags);
+	}
+	return 0;
 }
 
 static int
@@ -3631,10 +3766,18 @@ spdk_fuse_dispatcher_get_operation_name(uint32_t opcode)
 	return fuse_op_names[opcode].name;
 }
 
+#define FUSE_OPCODE_SUPPORTED(fuse_io) \
+	(fuse_io->disp->supported_fuse_opcodes & (1ULL << fuse_io->hdr.opcode))
+
 static int
 fuse_dispatcher_submit_io(struct fuse_io *fuse_io)
 {
 	int rc;
+
+	if (FUSE_OPCODE_SUPPORTED(fuse_io)) {
+		rc = fuse_dispatcher_fill_fuse(fuse_io);
+		goto submit;
+	}
 
 	switch (fuse_io->hdr.opcode) {
 	case FUSE_LOOKUP:
@@ -3798,6 +3941,7 @@ fuse_dispatcher_submit_io(struct fuse_io *fuse_io)
 		break;
 	}
 
+submit:
 	if (rc) {
 		if (_fuse_op_requires_reply(fuse_io->hdr.opcode)) {
 			fuse_dispatcher_io_complete_err(fuse_io, rc);
