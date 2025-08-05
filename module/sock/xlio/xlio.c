@@ -655,7 +655,7 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 	}
 	freeaddrinfo(res0);
 
-	if (rc < 0) {
+	if (rc < 0 || sock->rc != 0) {
 		xlio_socket_destroy(sock->xlio_sock);
 		return NULL;
 	}
