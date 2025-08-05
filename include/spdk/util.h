@@ -26,6 +26,11 @@ extern "C" {
 #define spdk_min(a,b) (((a)<(b))?(a):(b))
 #define spdk_max(a,b) (((a)>(b))?(a):(b))
 
+/* Increments a refcnt and returns its new value */
+#define spdk_refcnt_get(refcnt) (++(refcnt))
+/* Decrements a refcnt and returns its new value */
+#define spdk_refcnt_put(refcnt) (assert((refcnt) > 0), --(refcnt))
+
 #define SPDK_UNUSED(x) (void)(x)
 
 #define SPDK_COUNTOF(arr) (sizeof(arr) / sizeof((arr)[0]))
