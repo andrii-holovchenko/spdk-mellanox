@@ -14,6 +14,13 @@
 #include "spdk/assert.h"
 #include "spdk/dma.h"
 
+/* FUSE stuff may have already been included through a different header file. */
+#ifndef FUSE_KERNEL_VERSION
+#include "linux/fuse_kernel.h"
+#elif FUSE_KERNEL_VERSION < 7 || FUSE_KERNEL_MINOR_VERSION < 31
+#error FUSE kernel header conflict - fsdev requires at least version 7.31
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -215,6 +222,7 @@ enum spdk_fsdev_io_type {
 	SPDK_FSDEV_IO_GETLK,
 	SPDK_FSDEV_IO_SETLK,
 	SPDK_FSDEV_IO_READDIR_SIMPLE,
+	SPDK_FSDEV_IO_FUSE,
 	__SPDK_FSDEV_IO_LAST
 };
 
@@ -869,6 +877,70 @@ typedef int (spdk_fsdev_readdir_simple_entry_cb)(void *cb_arg, struct spdk_fsdev
  */
 typedef void (*spdk_fsdev_io_completion_cb)(struct spdk_fsdev_io *fsdev_io, void *cb_arg);
 
+struct spdk_fuse_in {
+	struct fuse_in_header *hdr;
+	union {
+		void *raw;
+		struct fuse_init_in *init;
+		struct fuse_forget_in *forget;
+		struct fuse_batch_forget_in *batch_forget;
+		struct fuse_getattr_in *getattr;
+		struct fuse_statx_in *statx;
+		struct fuse_mknod_in *mknod;
+		struct fuse_mkdir_in *mkdir;
+		struct fuse_rename_in *rename;
+		struct fuse_rename2_in *rename2;
+		struct fuse_link_in *link;
+		struct fuse_setattr_in *setattr;
+		struct fuse_open_in *open;
+		struct fuse_create_in *create;
+		struct fuse_release_in *release;
+		struct fuse_flush_in *flush;
+		struct fuse_read_in *read;
+		struct fuse_write_in *write;
+		struct fuse_fsync_in *fsync;
+		struct fuse_setxattr_in *setxattr;
+		struct fuse_getxattr_in *getxattr;
+		struct fuse_lk_in *lk;
+		struct fuse_access_in *access;
+		struct fuse_interrupt_in *interrupt;
+		struct fuse_ioctl_in *ioctl;
+		struct fuse_poll_in *poll;
+		struct fuse_fallocate_in *fallocate;
+		struct fuse_lseek_in *lseek;
+		struct fuse_copy_file_range_in *copy_file_range;
+		struct fuse_syncfs_in *syncfs;
+	} op;
+	struct iovec *iov;
+	uint32_t iovcnt;
+	struct spdk_memory_domain *memory_domain;
+	void *memory_domain_ctx;
+};
+
+struct spdk_fuse_create_out {
+	struct fuse_entry_out	entry;
+	struct fuse_open_out	open;
+};
+
+struct spdk_fuse_out {
+	struct fuse_out_header *hdr;
+	union {
+		void *raw;
+		struct fuse_init_out *init;
+		struct fuse_entry_out *entry;
+		struct fuse_open_out *open;
+		struct fuse_attr_out *attr;
+		struct fuse_write_out *write;
+		struct fuse_getxattr_out *getxattr;
+		struct fuse_statfs_out *statfs;
+		struct spdk_fuse_create_out *create;
+	} op;
+	struct iovec *iov;
+	uint32_t iovcnt;
+	struct spdk_memory_domain *memory_domain;
+	void *memory_domain_ctx;
+};
+
 struct spdk_fsdev_io {
 	/** The filesystem device that this I/O belongs to. */
 	struct spdk_fsdev *fsdev;
@@ -877,6 +949,7 @@ struct spdk_fsdev_io {
 	struct iovec iov;
 
 	union {
+		struct spdk_fuse_in fuse;
 		struct {
 			struct spdk_fsdev_mount_opts opts;
 		} mount;
@@ -1115,6 +1188,7 @@ struct spdk_fsdev_io {
 	} u_in;
 
 	union {
+		struct spdk_fuse_out fuse;
 		struct {
 			struct spdk_fsdev_mount_opts opts;
 			struct spdk_fsdev_file_object *root_fobject;

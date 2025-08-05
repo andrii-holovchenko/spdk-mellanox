@@ -117,6 +117,7 @@ static const char *fsdev_io_type_names[] = {
 	"getlk",
 	"setlk",
 	"readdir_simple",
+	"fuse",
 };
 SPDK_STATIC_ASSERT(SPDK_COUNTOF(fsdev_io_type_names) == __SPDK_FSDEV_IO_LAST, "Incorrect size");
 
