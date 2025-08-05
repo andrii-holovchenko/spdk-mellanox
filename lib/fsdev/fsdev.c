@@ -1884,6 +1884,12 @@ spdk_fsdev_close(struct spdk_fsdev_desc *desc)
 	spdk_spin_unlock(&g_fsdev_mgr.spinlock);
 }
 
+uint64_t
+spdk_fsdev_get_supported_fuse_opcodes(struct spdk_fsdev *fsdev)
+{
+	return fsdev->supported_fuse_opcodes;
+}
+
 static struct spdk_fsdev *
 fsdev_first(void)
 {

@@ -340,6 +340,23 @@ int spdk_fsdev_open(const char *fsdev_name, spdk_fsdev_event_cb_t event_cb,
 void spdk_fsdev_close(struct spdk_fsdev_desc *desc);
 
 /**
+ * Returns which FUSE opcodes are directly support by the specified fsdev.
+ *
+ * SPDK_FSDEV_IO_FUSE can be used to pass FUSE commands directly to an
+ * fsdev. This function returns a bitmask, specifying which FUSE opcodes
+ * are directly supported in this manner.
+ *
+ * Example: to check if an fsdev supports SPDK_FSDEV_IO_FUSE for FUSE_OPEN
+ * opcode:
+ *
+ * spdk_fsdev_get_supported_fuse_opcodes(fsdev) & (1ULL << FUSE_OPEN)
+ *
+ * \param fsdev The fsdev to check.
+ * \return bitmask of the supported FUSE opcodes
+ */
+uint64_t spdk_fsdev_get_supported_fuse_opcodes(struct spdk_fsdev *fsdev);
+
+/**
  * Callback function for spdk_for_each_fsdev().
  *
  * \param ctx Context passed to the callback.
