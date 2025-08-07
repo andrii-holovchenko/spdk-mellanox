@@ -66,11 +66,9 @@
 #define X86_O_DIRECTORY     00200000        /* must be a directory */
 #define X86_O_NOFOLLOW      00400000        /* don't follow links */
 
-static inline bool
+static inline void
 fsdev_d2h_open_flags(enum spdk_fuse_arch fuse_arch, uint32_t flags, uint32_t *translated_flags)
 {
-	bool res = true;
-
 	*translated_flags = flags;
 
 	/* NOTE: we always check the original flags to avoid situation where the arch and the native flags
@@ -119,13 +117,10 @@ fsdev_d2h_open_flags(enum spdk_fuse_arch fuse_arch, uint32_t flags, uint32_t *tr
 	default:
 		SPDK_ERRLOG("Unsupported FUSE arch: %d\n", fuse_arch);
 		assert(0);
-		res = false;
 		break;
 	}
 
 #undef REPLACE_FLAG
-
-	return res;
 }
 
 struct fuse_forget_data {
@@ -1714,11 +1709,7 @@ fuse_dispatcher_fill_open(struct fuse_io *fuse_io)
 		return -EINVAL;
 	}
 
-	if (!fsdev_d2h_open_flags(disp->fuse_arch, fsdev_io_d2h_u32(fuse_io->disp, arg->flags),
-				  &flags)) {
-		SPDK_ERRLOG("Cannot translate flags\n");
-		return -EINVAL;
-	}
+	fsdev_d2h_open_flags(disp->fuse_arch, fsdev_io_d2h_u32(fuse_io->disp, arg->flags), &flags);
 
 	fuse_init_fsdev_io(fuse_io, SPDK_FSDEV_IO_OPEN);
 
@@ -2848,10 +2839,7 @@ fuse_dispatcher_fill_create(struct fuse_io *fuse_io)
 		umask = fsdev_io_d2h_u32(fuse_io->disp, arg->umask);
 	}
 
-	if (!fsdev_d2h_open_flags(disp->fuse_arch, fsdev_io_d2h_u32(fuse_io->disp, arg->flags), &flags)) {
-		SPDK_ERRLOG("Cannot translate flags\n");
-		return -EINVAL;
-	}
+	fsdev_d2h_open_flags(disp->fuse_arch, fsdev_io_d2h_u32(fuse_io->disp, arg->flags), &flags);
 
 	fuse_init_fsdev_io(fuse_io, SPDK_FSDEV_IO_CREATE);
 
