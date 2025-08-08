@@ -1102,18 +1102,22 @@ spdk_xlio_socket_event_cb(xlio_socket_t xlio_sock, uintptr_t userdata_sq, int ev
 
 	switch (event) {
 	case XLIO_SOCKET_EVENT_ESTABLISHED:
+		SPDK_DEBUGLOG(sock_xlio, "%p: ESTABLISHED\n", sock);
 		sock->rc = 0;
 		break;
 	case XLIO_SOCKET_EVENT_TERMINATED:
+		SPDK_DEBUGLOG(sock_xlio, "%p: TERMINATED\n", sock);
 		/* This is the last event we'll get. */
 		free(sock);
 		break;
 	case XLIO_SOCKET_EVENT_CLOSED:
+		SPDK_DEBUGLOG(sock_xlio, "%p: CLOSED\n", sock);
 		/* The remote side closed the connection. Set an error here
 		 * and wait for the user to close the socket for clean up. */
 		sock->rc = ENOTCONN;
 		break;
 	case XLIO_SOCKET_EVENT_ERROR:
+		SPDK_DEBUGLOG(sock_xlio, "%p: ERROR (%d)\n", sock, value);
 		/* There was an error. Set the error here and wait for the
 		 * user to close the socket for clean up. */
 		sock->rc = value;
