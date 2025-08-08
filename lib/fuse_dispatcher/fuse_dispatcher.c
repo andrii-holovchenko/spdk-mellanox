@@ -123,11 +123,6 @@ fsdev_d2h_open_flags(enum spdk_fuse_arch fuse_arch, uint32_t flags, uint32_t *tr
 #undef REPLACE_FLAG
 }
 
-struct fuse_forget_data {
-	uint64_t ino;
-	uint64_t nlookup;
-};
-
 struct iov_offs {
 	size_t iov_offs;
 	size_t buf_offs;
@@ -175,7 +170,7 @@ struct fuse_io {
 		} readdir;
 		struct {
 			uint32_t to_forget;
-			struct fuse_forget_data *forgets;
+			struct fuse_forget_one *forgets;
 			int status;
 			uint32_t idx;
 		} batch_forget;
@@ -3356,12 +3351,12 @@ static void
 fuse_dispatcher_batch_forget_next(struct fuse_io *fuse_io)
 {
 	struct spdk_fsdev_io *fsdev_io = fuse_to_fsdev_io(fuse_io);
-	struct fuse_forget_data *forget;
+	struct fuse_forget_one *forget;
 	uint64_t ino;
 	uint64_t nlookup;
 
 	forget = &fuse_io->u.batch_forget.forgets[fuse_io->u.batch_forget.idx];
-	ino = fsdev_io_d2h_u64(fuse_io->disp, forget->ino);
+	ino = fsdev_io_d2h_u64(fuse_io->disp, forget->nodeid);
 	nlookup = fsdev_io_d2h_u64(fuse_io->disp, forget->nlookup);
 
 	fuse_init_fsdev_io_ex(fuse_io, SPDK_FSDEV_IO_FORGET, fuse_dispatcher_batch_forget_cpl_cb);
@@ -3379,7 +3374,7 @@ static int
 fuse_dispatcher_batch_forget(struct fuse_io *fuse_io)
 {
 	struct fuse_batch_forget_in *arg;
-	struct fuse_forget_data *forgets;
+	struct fuse_forget_one *forgets;
 	size_t scount;
 	uint32_t count;
 
