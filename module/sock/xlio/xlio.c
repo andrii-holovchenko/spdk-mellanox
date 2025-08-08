@@ -67,6 +67,7 @@ struct spdk_xlio_sock {
 	uint32_t				stream_offset;
 
 	char				interface_name[IFNAMSIZ];
+	int				refcnt;
 };
 
 struct spdk_xlio_sock_group {
@@ -378,6 +379,27 @@ xlio_sock_set_sendbuf(struct spdk_sock *_sock, int sz)
 	return 0;
 }
 
+static void
+xlio_sock_put(struct spdk_xlio_sock *sock)
+{
+	if (spdk_refcnt_put(sock->refcnt) > 0) {
+		return;
+	}
+	free(sock);
+}
+
+static void
+xlio_sock_get(struct spdk_xlio_sock *sock)
+{
+	spdk_refcnt_get(sock->refcnt);
+}
+
+static bool
+xlio_sock_is_destroyed(struct spdk_xlio_sock *sock)
+{
+	return sock->xlio_sock == (xlio_socket_t)NULL;
+}
+
 static struct spdk_xlio_sock *
 alloc_xlio_sock(struct spdk_xlio_sock_group *group)
 {
@@ -390,6 +412,7 @@ alloc_xlio_sock(struct spdk_xlio_sock_group *group)
 		return NULL;
 	}
 
+	sock->refcnt = 1;
 	sock->group = group;
 	STAILQ_INIT(&sock->pending_stream);
 
@@ -729,8 +752,22 @@ xlio_sock_close(struct spdk_sock_group_impl *_group, struct spdk_sock *_sock)
 	/* This is actually asynchronous. The remainder of the process will occur
 	 * in the event callback. */
 	rc = xlio_socket_destroy(sock->xlio_sock);
+	if (rc != 0) {
+		return rc;
+	}
 
-	return rc;
+	/* The spdk_sock_close() interface is synchronous, so wait until the socket gets fully
+	 * destroyed.  Otherwise, if we try to bind to the same address before receiving the
+	 * TERMINATED event might fail.  Note that the socket is freed in the callback, so we need
+	 * to take an extra ref while busy polling.
+	 */
+	xlio_sock_get(sock);
+	while (!xlio_sock_is_destroyed(sock)) {
+		xlio_poll_group_poll(group->xlio_group);
+	}
+	xlio_sock_put(sock);
+
+	return 0;
 }
 
 static int
@@ -1108,7 +1145,8 @@ spdk_xlio_socket_event_cb(xlio_socket_t xlio_sock, uintptr_t userdata_sq, int ev
 	case XLIO_SOCKET_EVENT_TERMINATED:
 		SPDK_DEBUGLOG(sock_xlio, "%p: TERMINATED\n", sock);
 		/* This is the last event we'll get. */
-		free(sock);
+		sock->xlio_sock = (xlio_socket_t)NULL;
+		xlio_sock_put(sock);
 		break;
 	case XLIO_SOCKET_EVENT_CLOSED:
 		SPDK_DEBUGLOG(sock_xlio, "%p: CLOSED\n", sock);
@@ -1195,6 +1233,7 @@ spdk_xlio_socket_accept_cb(xlio_socket_t xlio_sock, xlio_socket_t parent,
 		return;
 	}
 
+	sock->refcnt = 1;
 	sock->xlio_sock = xlio_sock;
 	sock->group = group;
 	STAILQ_INIT(&sock->pending_stream);
