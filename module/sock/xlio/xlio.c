@@ -37,6 +37,8 @@ struct spdk_xlio_domain {
 	struct spdk_mem_map		*map;
 	struct spdk_memory_domain	*domain;
 	struct ibv_pd			*pd;
+
+	STAILQ_ENTRY(spdk_xlio_domain)	link;
 };
 
 struct spdk_xlio_sock {
@@ -45,6 +47,7 @@ struct spdk_xlio_sock {
 
 	struct spdk_xlio_sock_group	*group;
 	struct spdk_xlio_domain		*domain;
+	struct spdk_xlio_sock		*listen_sock;
 
 	/* The current status code of this socket. In practice the following codes will
 	 * appear:
@@ -104,8 +107,8 @@ static struct spdk_sock_impl_opts g_xlio_impl_opts = {
 	.tls_cipher_suites = NULL
 };
 
-/* TODO: Since this is a PoC, we'll only support one adapter and store this globally. */
-static struct spdk_xlio_domain *g_domain = NULL;
+static pthread_mutex_t g_domain_mutex = PTHREAD_MUTEX_INITIALIZER;
+static STAILQ_HEAD(, spdk_xlio_domain) g_domains = STAILQ_HEAD_INITIALIZER(g_domains);
 
 static int
 spdk_xlio_mem_notify(void *cb_ctx, struct spdk_mem_map *map,
@@ -565,17 +568,28 @@ xlio_sock_create_domain(struct ibv_pd *pd)
 static struct spdk_xlio_domain *
 xlio_sock_get_domain(struct spdk_xlio_sock *sock)
 {
+	struct spdk_xlio_domain *domain;
 	struct ibv_pd *pd;
 
-	if (g_domain == NULL) {
-		/* This is the first socket. We can finally discover the protection domain. */
-		pd = xlio_socket_get_pd(sock->xlio_sock);
-		assert(pd != NULL);
+	pthread_mutex_lock(&g_domain_mutex);
 
-		g_domain = xlio_sock_create_domain(pd);
+	pd = xlio_socket_get_pd(sock->xlio_sock);
+
+	STAILQ_FOREACH(domain, &g_domains, link) {
+		if (domain->pd == pd) {
+			break;
+		}
 	}
 
-	return g_domain;
+	if (domain == NULL) {
+		/* This is the first socket on this domain. */
+		domain = xlio_sock_create_domain(pd);
+		STAILQ_INSERT_TAIL(&g_domains, domain, link);
+	}
+
+	pthread_mutex_unlock(&g_domain_mutex);
+
+	return domain;
 }
 
 static struct spdk_sock *
@@ -701,7 +715,13 @@ xlio_sock_accept(struct spdk_sock *_sock)
 	group = listen_sock->group;
 	assert(group != NULL);
 
-	sock = STAILQ_FIRST(&group->pending_accept);
+	/* Find the first socket for this listen socket. */
+	STAILQ_FOREACH(sock, &group->pending_accept, link) {
+		if (sock->listen_sock == listen_sock) {
+			break;
+		}
+	}
+
 	if (sock == NULL) {
 		if (listen_sock->events.rx) {
 			STAILQ_REMOVE(&group->pending_rx, listen_sock, spdk_xlio_sock, link);
@@ -710,7 +730,7 @@ xlio_sock_accept(struct spdk_sock *_sock)
 		return NULL;
 	}
 
-	STAILQ_REMOVE_HEAD(&group->pending_accept, link);
+	STAILQ_REMOVE(&group->pending_accept, sock, spdk_xlio_sock, link);
 	sock->events.accept = false;
 
 	if (STAILQ_EMPTY(&group->pending_accept)) {
@@ -1236,6 +1256,7 @@ spdk_xlio_socket_accept_cb(xlio_socket_t xlio_sock, xlio_socket_t parent,
 	sock->refcnt = 1;
 	sock->xlio_sock = xlio_sock;
 	sock->group = group;
+	sock->listen_sock = listen_sock;
 	STAILQ_INIT(&sock->pending_stream);
 
 	rc = xlio_socket_update(xlio_sock, 0, (uintptr_t)sock);
