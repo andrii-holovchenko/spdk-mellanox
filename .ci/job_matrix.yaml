@@ -20,7 +20,7 @@ kubernetes:
   privileged: true
 
 env:
-  MOFED_VER: 25.04-0.6.1.0
+  MOFED_VER: 25.07-0.9.6.0
   REGISTRY_AUTH_FILE: '/mnt/secret_podman/config_podman.json'
   GIT_SSH_COMMAND: 'ssh -o StrictHostKeyChecking=no'
 
