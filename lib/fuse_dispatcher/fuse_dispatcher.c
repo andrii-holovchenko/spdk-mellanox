@@ -1154,6 +1154,18 @@ fuse_dispatcher_readdir_cpl_cb(void *cb_arg, int status, struct spdk_fsdev_io *f
 }
 
 static void
+fuse_dispatcher_reset(struct spdk_fuse_dispatcher *disp)
+{
+	disp->proto_major = 0;
+	disp->proto_minor = 0;
+	disp->root_fobject = NULL;
+	SPDK_DEBUGLOG(fuse_dispatcher, "%s unmounted\n", fuse_dispatcher_name(disp));
+
+	/* Save the state */
+	fuse_dispatcher_update_rmem(disp);
+}
+
+static void
 fuse_dispatcher_cpl_cb(void *cb_arg, int status, struct spdk_fsdev_io *fsdev_io)
 {
 	struct fuse_io *fuse_io = cb_arg;
@@ -3305,13 +3317,7 @@ fuse_dispatcher_fill_umount_cpl_clb(void *cb_arg, int status, struct spdk_fsdev_
 	struct fuse_io *fuse_io = cb_arg;
 	struct spdk_fuse_dispatcher *disp = fuse_io->disp;
 
-	disp->proto_major = disp->proto_minor = 0;
-	disp->root_fobject = NULL;
-	SPDK_DEBUGLOG(fuse_dispatcher, "%s unmounted\n", fuse_dispatcher_name(disp));
-
-	/* Save the state */
-	fuse_dispatcher_update_rmem(disp);
-
+	fuse_dispatcher_reset(disp);
 	fuse_dispatcher_io_complete_err(fuse_io, 0);
 }
 
