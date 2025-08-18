@@ -133,6 +133,30 @@ def fsdev_reset_iostat(client, name: str = None):
     return client.call('fsdev_reset_iostat', params)
 
 
+def fsdev_set_delays(client, name: str = None, submit: int = None,
+                     complete: int = None, complete_99: int = None):
+    """Set submission and/or completion delays for fsdev I/O
+
+    Args:
+        name: filesystem name
+        submit: Submission delay in microseconds
+        complete: Completion delay in microseconds
+        complete_99: 99% completion delay in microseconds
+    """
+    params = {}
+
+    params['name'] = name
+
+    if submit is not None:
+        params['submit'] = submit
+    if complete is not None:
+        params['complete'] = complete
+    if complete_99 is not None:
+        params['complete_99'] = complete_99
+
+    return client.call('fsdev_set_delays', params)
+
+
 def fsdev_aio_set_options(client, max_io_depth: int = None, enable_io_uring: bool = None):
     """Set aio filesystem options.
 

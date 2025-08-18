@@ -36,6 +36,7 @@
 	spdk_fsdev_enable_notifications;
 	spdk_fsdev_disable_notifications;
 	spdk_fsdev_dump_info_json;
+	spdk_fsdev_set_delays;
 	spdk_for_each_fsdev;
 
 	# Public functions in fsdev_module.h

@@ -1243,6 +1243,15 @@ struct spdk_fsdev_io {
 
 		/* Timestamp */
 		uint64_t submit_tsc;
+
+		/* TSC when delayed IO will be sent to fsdev module */
+		uint64_t delayed_submit_tsc;
+
+		/* TSC when delayed IO will be completed to upper layer */
+		uint64_t delayed_complete_tsc;
+
+		/** Entry to the list io_submitted of struct spdk_fsdev_channel */
+		TAILQ_ENTRY(spdk_fsdev_io) delay_link;
 	} internal;
 
 	/**
@@ -1290,6 +1299,26 @@ void spdk_fsdev_io_init(struct spdk_fsdev_io *fsdev_io, struct spdk_fsdev_desc *
  * \param fsdev_io I/O request.
  */
 void spdk_fsdev_io_submit(struct spdk_fsdev_io *fsdev_io);
+
+/**
+ * Specify submission and/or completions delays for I/O for the specified fsdev.
+ *
+ * 99% completion delay means that 1-out-of-100 I/O on each channel will incur
+ * the specified amount of delay before completion to the upper layer. The other
+ * 99 I/O will incur the regular completion delay. If 99% completion delay is 0
+ * (disabled), then all I/O inclur the regular completion delay.
+ *
+ * Note that all I/O must always be submitted to the fsdev module in source
+ * unique order, so 99% submission delay is not an option.
+ *
+ * \param fsdev The fsdev to set delays for
+ * \param submit_us Submission delay in microseconds
+ * \param complete_us Completion delay in microseconds
+ * \param complete_99_us 99% completion delay in microseconds
+ * \return 0 for success, negative errno for failure
+ */
+int spdk_fsdev_set_delays(struct spdk_fsdev *fsdev, uint64_t submit_us,
+			  uint64_t complete_us, uint64_t complete_99_us);
 
 /* Poll operation type. */
 enum spdk_fsdev_poll_event_type {

@@ -235,6 +235,15 @@ struct spdk_fsdev {
 
 		/** accumulated I/O statistics for previously deleted channels of this fsdev */
 		struct spdk_fsdev_io_stat *hist_stat;
+
+		/** tsc for delaying submission */
+		uint64_t delayed_submit_tsc;
+
+		/** tsc for delaying completion */
+		uint64_t delayed_complete_tsc;
+
+		/** tsc for delaying 99% completion (1-out-of-100) */
+		uint64_t delayed_99_complete_tsc;
 	} internal;
 };
 

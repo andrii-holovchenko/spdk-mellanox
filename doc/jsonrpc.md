@@ -14482,6 +14482,55 @@ Example response:
 }
 ~~~
 
+### fsdev_set_delays {#rpc_fsdev_set_delays}
+
+Set submission and/or completion delays for fsdev I/O.
+
+99% completion delay means that 1-out-of-100 I/O on each channel will incur
+that amount of delay before completion to the upper layer. The other 99 I/O
+will incur the regular completion delay. If 99% completion delay is 0
+(disabled), then all I/O incur the regular completion delay.
+
+Note that all I/O must always be submitted to the fsdev module in source
+unique order, so 99% submission delay is not an option.
+
+#### Parameters
+
+Name                    | Optional | Type        | Description
+----------------------- | -------- | ----------- | -----------
+name                    | Required | string      | fsdev name
+submit                  | Optional | int         | submission delay in us (default 0)
+complete                | Optional | int         | completion delay in us (default 0)
+complete_99             | Optional | int         | 99% completion delay in us (default 0)
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "fsdev_set_delays",
+  "id": 1,
+  "params": {
+    "name": "aio0",
+    "submit": 5000,
+    "complete": 5000,
+    "complete_99": 2000000
+  }
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": true
+}
+~~~
+
 ### fsdev_aio_create {#fsdev_aio_create}
 
 Create an AIO fsdev.

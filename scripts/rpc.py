@@ -3760,6 +3760,21 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('-f', '--name', help="Name of the fsdev. Example: aio0", required=False)
     p.set_defaults(func=fsdev_reset_iostat)
 
+    def fsdev_set_delays(args):
+        print_json(rpc.fsdev.fsdev_set_delays(args.client, name=args.name, submit=args.submit,
+                                              complete=args.complete, complete_99=args.complete_99))
+
+    p = subparsers.add_parser('fsdev_set_delays',
+                              help='Set submission and/or completion delays for fsdev I/O')
+    p.add_argument('name', help="Name of the fsdev. Example: aio0")
+    p.add_argument('-s', '--submit', help='Submission delay in microseconds (default 0: disabled)',
+                   required=False, type=int)
+    p.add_argument('-c', '--complete', help='Completion delay in microseconds (default 0: disabled)',
+                   required=False, type=int)
+    p.add_argument('-n', '--complete-99', help='99% Completion delay in microseconds (default 0: disabled)',
+                   required=False, type=int)
+    p.set_defaults(func=fsdev_set_delays)
+
     def fsdev_aio_set_options(args):
         print(rpc.fsdev.fsdev_aio_set_options(args.client, max_io_depth=args.max_io_depth, enable_io_uring=args.enable_io_uring))
 

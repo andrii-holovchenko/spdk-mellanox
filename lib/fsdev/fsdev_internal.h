@@ -43,6 +43,15 @@ struct spdk_fsdev_channel {
 
 	/* Stat */
 	struct spdk_fsdev_io_stat *stat;
+
+	/* Poller for delayed IO handling */
+	struct spdk_poller	*poller;
+
+	/* TAILQs for holding delayed IOs */
+	fsdev_io_tailq_t	delayed_submit;
+	fsdev_io_tailq_t	delayed_complete;
+	fsdev_io_tailq_t	delayed_99_complete;
+	uint32_t		delayed_99_count;
 };
 
 const char *fsdev_notify_type_get_name(enum spdk_fsdev_notify_type type);

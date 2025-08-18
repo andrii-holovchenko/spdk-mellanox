@@ -476,14 +476,88 @@ spdk_fsdev_io_init(struct spdk_fsdev_io *fsdev_io, struct spdk_fsdev_desc *desc,
 	fsdev_io->fsdev = spdk_fsdev_desc_get_fsdev(desc);
 }
 
+static inline void fsdev_io_complete(void *ctx);
+
+static int
+poll_delayed_io(void *_ch)
+{
+	struct spdk_fsdev_channel *ch = _ch;
+	uint64_t current_tsc = spdk_get_ticks();
+	struct spdk_fsdev_io *fsdev_io;
+	struct spdk_fsdev *fsdev = ch->fsdev;
+	int ret = SPDK_POLLER_IDLE;
+
+	while (!TAILQ_EMPTY(&ch->delayed_submit)) {
+		fsdev_io = TAILQ_FIRST(&ch->delayed_submit);
+		if (fsdev_io->internal.delayed_submit_tsc > current_tsc) {
+			break;
+		}
+		TAILQ_REMOVE(&ch->delayed_submit, fsdev_io, internal.delay_link);
+		fsdev_io->fsdev->fn_table->submit_request(ch->channel, fsdev_io);
+		ret = SPDK_POLLER_BUSY;
+	}
+
+	while (!TAILQ_EMPTY(&ch->delayed_complete)) {
+		fsdev_io = TAILQ_FIRST(&ch->delayed_complete);
+		if (fsdev_io->internal.delayed_complete_tsc > current_tsc) {
+			break;
+		}
+		TAILQ_REMOVE(&ch->delayed_complete, fsdev_io, internal.delay_link);
+		fsdev_io_complete(fsdev_io);
+		ret = SPDK_POLLER_BUSY;
+	}
+
+	while (!TAILQ_EMPTY(&ch->delayed_99_complete)) {
+		fsdev_io = TAILQ_FIRST(&ch->delayed_99_complete);
+		if (fsdev_io->internal.delayed_complete_tsc > current_tsc) {
+			break;
+		}
+		TAILQ_REMOVE(&ch->delayed_99_complete, fsdev_io, internal.delay_link);
+		fsdev_io_complete(fsdev_io);
+		ret = SPDK_POLLER_BUSY;
+	}
+
+	/* If all delays have been disabled and the TAILQs are all empty, we can
+	 * safely unregister the poller.
+	 */
+	if (fsdev->internal.delayed_submit_tsc == 0 && TAILQ_EMPTY(&ch->delayed_submit) &&
+	    fsdev->internal.delayed_complete_tsc == 0 && TAILQ_EMPTY(&ch->delayed_complete) &&
+	    fsdev->internal.delayed_99_complete_tsc == 0 && TAILQ_EMPTY(&ch->delayed_99_complete)) {
+		spdk_poller_unregister(&ch->poller);
+	}
+	return ret;
+}
+
+static void
+clear_delayed_io(struct spdk_fsdev_channel *ch)
+{
+	struct spdk_fsdev_io *fsdev_io;
+
+	while (!TAILQ_EMPTY(&ch->delayed_submit)) {
+		fsdev_io = TAILQ_FIRST(&ch->delayed_submit);
+		TAILQ_REMOVE(&ch->delayed_submit, fsdev_io, internal.delay_link);
+	}
+
+	while (!TAILQ_EMPTY(&ch->delayed_complete)) {
+		fsdev_io = TAILQ_FIRST(&ch->delayed_complete);
+		TAILQ_REMOVE(&ch->delayed_complete, fsdev_io, internal.delay_link);
+	}
+
+	while (!TAILQ_EMPTY(&ch->delayed_99_complete)) {
+		fsdev_io = TAILQ_FIRST(&ch->delayed_99_complete);
+		TAILQ_REMOVE(&ch->delayed_99_complete, fsdev_io, internal.delay_link);
+	}
+}
+
 void
 spdk_fsdev_io_submit(struct spdk_fsdev_io *fsdev_io)
 {
 	struct spdk_fsdev *fsdev = fsdev_io->fsdev;
 	struct spdk_fsdev_channel *ch = fsdev_io->internal.ch;
 	struct spdk_fsdev_shared_resource *shared_resource = ch->shared_resource;
+	uint64_t current_tsc = spdk_get_ticks();
 
-	fsdev_io->internal.submit_tsc = spdk_get_ticks();
+	fsdev_io->internal.submit_tsc = current_tsc;
 
 	TAILQ_INSERT_TAIL(&ch->io_submitted, fsdev_io, internal.ch_link);
 
@@ -491,11 +565,27 @@ spdk_fsdev_io_submit(struct spdk_fsdev_io *fsdev_io)
 	ch->stat->io[fsdev_io->internal.type].count++;
 	ch->stat->io[fsdev_io->internal.type].io_outstanding++;
 	shared_resource->io_outstanding++;
-	fsdev_io->internal.in_submit_request = true;
-	spdk_trace_record(TRACE_FSDEV_IO_START, ch->trace_id, 0, (uintptr_t)fsdev_io,
-			  fsdev_io->internal.type, ch->io_outstanding, fsdev_io->internal.usr_cb_arg);
-	fsdev->fn_table->submit_request(ch->channel, fsdev_io);
-	fsdev_io->internal.in_submit_request = false;
+	spdk_trace_record_tsc(current_tsc, TRACE_FSDEV_IO_START, ch->trace_id, 0, (uintptr_t)fsdev_io,
+			      fsdev_io->internal.type, ch->io_outstanding, fsdev_io->internal.usr_cb_arg);
+
+	if (spdk_unlikely(!TAILQ_EMPTY(&ch->delayed_submit))) {
+		/* We must always submit I/O the fsdev module in source unique order. So if there are
+		 * already IO in the delayed submit queue, we need to add this one to it - even if
+		 * the delay has been disabled or reduced.
+		 */
+		fsdev_io->internal.delayed_submit_tsc = current_tsc + fsdev->internal.delayed_submit_tsc;
+		TAILQ_INSERT_TAIL(&ch->delayed_submit, fsdev_io, internal.delay_link);
+	} else if (spdk_unlikely(fsdev->internal.delayed_submit_tsc > 0)) {
+		fsdev_io->internal.delayed_submit_tsc = current_tsc + fsdev->internal.delayed_submit_tsc;
+		TAILQ_INSERT_TAIL(&ch->delayed_submit, fsdev_io, internal.delay_link);
+		if (ch->poller == NULL) {
+			ch->poller = SPDK_POLLER_REGISTER(poll_delayed_io, ch, 0);
+		}
+	} else {
+		fsdev_io->internal.in_submit_request = true;
+		fsdev->fn_table->submit_request(ch->channel, fsdev_io);
+		fsdev_io->internal.in_submit_request = false;
+	}
 }
 
 static void
@@ -594,6 +684,9 @@ fsdev_channel_create(void *io_device, void *ctx_buf)
 	ch->io_outstanding = 0;
 	ch->shared_resource = shared_resource;
 	TAILQ_INIT(&ch->io_submitted);
+	TAILQ_INIT(&ch->delayed_submit);
+	TAILQ_INIT(&ch->delayed_complete);
+	TAILQ_INIT(&ch->delayed_99_complete);
 	fsdev_init_io_stat(ch->stat);
 	ch->trace_id = fsdev->internal.trace_id;
 
@@ -640,6 +733,7 @@ fsdev_channel_destroy(void *io_device, void *ctx_buf)
 	spdk_spin_lock(&fsdev->internal.spinlock);
 	fsdev_add_io_stat(fsdev->internal.hist_stat, ch->stat);
 	spdk_spin_unlock(&fsdev->internal.spinlock);
+	spdk_poller_unregister(&ch->poller);
 
 	free(ch->stat);
 	fsdev_channel_destroy_resource(ch);
@@ -899,6 +993,7 @@ fsdev_reset_purge_channel_msg_cb(struct spdk_io_channel_iter *i)
 		SPDK_WARNLOG("%s: %s: still has %" PRIu64 " uncompleted IOs. Purging them...\n",
 			     spdk_fsdev_get_name(fsdev), spdk_thread_get_name(spdk_get_thread()), ch->io_outstanding);
 		/* Force the remained outstanding IOs */
+		clear_delayed_io(ch);
 		while (!TAILQ_EMPTY(&ch->io_submitted)) {
 			struct spdk_fsdev_io *fsdev_io = TAILQ_FIRST(&ch->io_submitted);
 			spdk_fsdev_io_complete(fsdev_io, -ECANCELED);
@@ -1339,6 +1434,10 @@ fsdev_io_complete(void *ctx)
 void
 spdk_fsdev_io_complete(struct spdk_fsdev_io *fsdev_io, int status)
 {
+	struct spdk_fsdev_channel *ch = fsdev_io->internal.ch;
+	struct spdk_fsdev *fsdev = fsdev_io->fsdev;
+	uint64_t current_tsc;
+
 	/* Positive status values are not allowed, in some cases they can
 	 * crash the host kernel when received for operations where they are
 	 * not expected. So forcibly negate them when found. But this indicates
@@ -1350,7 +1449,43 @@ spdk_fsdev_io_complete(struct spdk_fsdev_io *fsdev_io, int status)
 		status = -status;
 	}
 	fsdev_io->internal.status = status;
-	fsdev_io_complete(fsdev_io);
+
+	current_tsc = spdk_get_ticks();
+	if (spdk_unlikely(status == -ECANCELED)) {
+		/* Never delay CANCELED IOs. */
+		fsdev_io_complete(fsdev_io);
+		return;
+	}
+
+	if (spdk_unlikely(fsdev->internal.delayed_99_complete_tsc > 0)) {
+		if (++ch->delayed_99_count == 100) {
+			ch->delayed_99_count = 0;
+			fsdev_io->internal.delayed_complete_tsc =
+				current_tsc + fsdev->internal.delayed_99_complete_tsc;
+			/* We put 99% completions on a separate TAILQ because we want the
+			 * TAILQs to be sorted by tsc order and don't want to have to iterate
+			 * through the normal delayed completion TAILQ for where to put this one.
+			 */
+			TAILQ_INSERT_TAIL(&ch->delayed_99_complete, fsdev_io, internal.delay_link);
+			if (ch->poller == NULL) {
+				ch->poller = SPDK_POLLER_REGISTER(poll_delayed_io, ch, 0);
+			}
+			return;
+		}
+		/* This is one of the other 99 I/O, just fall through and use the normal
+		 * completion delay if it is specified.
+		 */
+	}
+
+	if (spdk_unlikely(fsdev->internal.delayed_complete_tsc > 0)) {
+		fsdev_io->internal.delayed_complete_tsc = current_tsc + fsdev->internal.delayed_complete_tsc;
+		TAILQ_INSERT_TAIL(&ch->delayed_complete, fsdev_io, internal.delay_link);
+		if (ch->poller == NULL) {
+			ch->poller = SPDK_POLLER_REGISTER(poll_delayed_io, ch, 0);
+		}
+	} else {
+		fsdev_io_complete(fsdev_io);
+	}
 }
 
 struct spdk_thread *
@@ -1891,6 +2026,16 @@ spdk_fsdev_module_list_find(const char *name)
 	}
 
 	return fsdev_module;
+}
+
+int
+spdk_fsdev_set_delays(struct spdk_fsdev *fsdev, uint64_t submit_us,
+		      uint64_t complete_us, uint64_t complete_99_us)
+{
+	fsdev->internal.delayed_submit_tsc = submit_us * spdk_get_ticks_hz() / SPDK_SEC_TO_USEC;
+	fsdev->internal.delayed_complete_tsc = complete_us * spdk_get_ticks_hz() / SPDK_SEC_TO_USEC;
+	fsdev->internal.delayed_99_complete_tsc = complete_99_us * spdk_get_ticks_hz() / SPDK_SEC_TO_USEC;
+	return 0;
 }
 
 SPDK_LOG_REGISTER_COMPONENT(fsdev)

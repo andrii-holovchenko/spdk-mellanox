@@ -642,3 +642,54 @@ rpc_fsdev_reset_iostat(struct spdk_jsonrpc_request *request, const struct spdk_j
 	rpc_fsdev_reset_iostat_next(ctx);
 }
 SPDK_RPC_REGISTER("fsdev_reset_iostat", rpc_fsdev_reset_iostat, SPDK_RPC_RUNTIME)
+
+struct rpc_fsdev_set_delays {
+	char *name;
+	uint64_t submit_us;
+	uint64_t complete_us;
+	uint64_t complete_99_us;
+};
+
+static const struct spdk_json_object_decoder rpc_fsdev_set_delays_decoders[] = {
+	{"name", offsetof(struct rpc_fsdev_set_delays, name), spdk_json_decode_string, false},
+	{"submit", offsetof(struct rpc_fsdev_set_delays, submit_us), spdk_json_decode_uint64, true},
+	{"complete", offsetof(struct rpc_fsdev_set_delays, complete_us), spdk_json_decode_uint64, true},
+	{"complete_99", offsetof(struct rpc_fsdev_set_delays, complete_99_us), spdk_json_decode_uint64, true},
+};
+
+static void
+rpc_fsdev_set_delays(struct spdk_jsonrpc_request *request, const struct spdk_json_val *params)
+{
+	struct rpc_fsdev_set_delays rpc = {};
+	struct spdk_fsdev_desc *desc;
+	int rc;
+
+	if (spdk_json_decode_object(params, rpc_fsdev_set_delays_decoders,
+				    SPDK_COUNTOF(rpc_fsdev_set_delays_decoders),
+				    &rpc)) {
+		SPDK_ERRLOG("spdk_json_decode_object failed\n");
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INVALID_PARAMS,
+						 "spdk_json_decode_object failed");
+		return;
+	}
+
+	rc = spdk_fsdev_open(rpc.name, _rpc_fsdev_event_cb, NULL, &desc);
+	if (rc) {
+		SPDK_ERRLOG("spdk_fsdev_open(%s) failed with %d\n", rpc.name, rc);
+		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
+		goto ret;
+	}
+
+	rc = spdk_fsdev_set_delays(spdk_fsdev_desc_get_fsdev(desc), rpc.submit_us,
+				   rpc.complete_us, rpc.complete_99_us);
+	if (rc) {
+		spdk_jsonrpc_send_error_response_fmt(request, SPDK_JSONRPC_ERROR_INVALID_PARAMS,
+						     "spdk_fsdev_set_delays failed with %d", rc);
+		goto ret;
+	}
+
+	spdk_jsonrpc_send_bool_response(request, true);
+ret:
+	free(rpc.name);
+}
+SPDK_RPC_REGISTER("fsdev_set_delays", rpc_fsdev_set_delays, SPDK_RPC_RUNTIME)
