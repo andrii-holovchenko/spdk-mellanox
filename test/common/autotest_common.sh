@@ -417,10 +417,12 @@ function get_config_params() {
 	config_params='--enable-debug --enable-werror'
 
 	# for options with dependencies but no test flag, set them here
-	if [[ $SPDK_TEST_ACCEL_MLX5 -eq 1 ]]; then
-		config_params+=' --with-rdma=mlx5_dv'
-	elif [ -f /usr/include/infiniband/verbs.h ]; then
-		config_params+=' --with-rdma'
+	if [[ $SPDK_TEST_NVMF_TRANSPORT == 'rdma' ]]; then
+		if [[ $SPDK_TEST_ACCEL_MLX5 -eq 1 ]]; then
+			config_params+=' --with-rdma=mlx5_dv'
+		elif [ -f /usr/include/infiniband/verbs.h ]; then
+			config_params+=' --with-rdma'
+		fi
 	fi
 
 	if [ $SPDK_TEST_USDT -eq 1 ]; then
