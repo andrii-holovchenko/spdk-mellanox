@@ -1277,6 +1277,7 @@ fsdev_io_complete(void *ctx)
 	struct spdk_fsdev_io *fsdev_io = ctx;
 	enum spdk_fsdev_io_type type = spdk_fsdev_io_get_type(fsdev_io);
 	struct spdk_fsdev_channel *fsdev_ch = fsdev_io->internal.ch;
+	struct spdk_fsdev_shared_resource *shared_resource = fsdev_ch->shared_resource;
 	uint64_t submit_tsc;
 	uint64_t tsc_diff;
 	spdk_fsdev_io_cleanup_cb cleanup_cb_fn;
@@ -1292,6 +1293,14 @@ fsdev_io_complete(void *ctx)
 		return;
 	}
 
+	assert(fsdev_ch->io_outstanding > 0);
+	assert(shared_resource->io_outstanding > 0);
+	fsdev_ch->io_outstanding--;
+	fsdev_ch->stat->io[fsdev_io->internal.type].io_outstanding--;
+	shared_resource->io_outstanding--;
+	TAILQ_REMOVE(&fsdev_ch->io_submitted, fsdev_io, internal.ch_link);
+	spdk_trace_record(TRACE_FSDEV_IO_DONE, fsdev_ch->trace_id, 0, (uintptr_t)fsdev_io,
+			  fsdev_ch->io_outstanding, fsdev_io->internal.usr_cb_arg);
 	assert(spdk_get_thread() == spdk_fsdev_io_get_thread(fsdev_io));
 
 	if (type == SPDK_FSDEV_IO_READ) {
@@ -1330,9 +1339,6 @@ fsdev_io_complete(void *ctx)
 void
 spdk_fsdev_io_complete(struct spdk_fsdev_io *fsdev_io, int status)
 {
-	struct spdk_fsdev_channel *fsdev_ch = fsdev_io->internal.ch;
-	struct spdk_fsdev_shared_resource *shared_resource = fsdev_ch->shared_resource;
-
 	/* Positive status values are not allowed, in some cases they can
 	 * crash the host kernel when received for operations where they are
 	 * not expected. So forcibly negate them when found. But this indicates
@@ -1344,14 +1350,6 @@ spdk_fsdev_io_complete(struct spdk_fsdev_io *fsdev_io, int status)
 		status = -status;
 	}
 	fsdev_io->internal.status = status;
-	assert(fsdev_ch->io_outstanding > 0);
-	assert(shared_resource->io_outstanding > 0);
-	fsdev_ch->io_outstanding--;
-	fsdev_ch->stat->io[fsdev_io->internal.type].io_outstanding--;
-	shared_resource->io_outstanding--;
-	spdk_trace_record(TRACE_FSDEV_IO_DONE, fsdev_ch->trace_id, 0, (uintptr_t)fsdev_io,
-			  fsdev_ch->io_outstanding, fsdev_io->internal.usr_cb_arg);
-	TAILQ_REMOVE(&fsdev_ch->io_submitted, fsdev_io, internal.ch_link);
 	fsdev_io_complete(fsdev_io);
 }
 
