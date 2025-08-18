@@ -438,6 +438,22 @@ alloc_xlio_sock(struct spdk_xlio_sock_group *group)
 		return NULL;
 	}
 
+	val = 1;
+	rc = xlio_socket_setsockopt(sock->xlio_sock, IPPROTO_TCP, TCP_NODELAY, &val, sizeof val);
+	if (rc != 0) {
+		SPDK_ERRLOG("Failed to set TCP_NODELAY: %s\n", spdk_strerror(-rc));
+		xlio_socket_destroy(sock->xlio_sock);
+		return NULL;
+	}
+
+	val = 1;
+	rc = xlio_socket_setsockopt(sock->xlio_sock, IPPROTO_TCP, TCP_QUICKACK, &val, sizeof val);
+	if (rc != 0) {
+		SPDK_ERRLOG("Failed to set TCP_QUICKACK: %s\n", spdk_strerror(-rc));
+		xlio_socket_destroy(sock->xlio_sock);
+		return NULL;
+	}
+
 	return sock;
 }
 
