@@ -380,9 +380,9 @@ nvme_tcp_ctrlr_disconnect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_
 			g_admin_poll_group_refcnt--;
 			if (g_admin_poll_group_refcnt == 0) {
 				spdk_sock_group_close(&g_admin_poll_group);
-				g_admin_poll_group = NULL;
 			}
 			pthread_mutex_unlock(&g_admin_poll_group_mutex);
+			tqpair->sock_group = NULL;
 		} else {
 			spdk_sock_group_close(&tqpair->sock_group);
 		}
