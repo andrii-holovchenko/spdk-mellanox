@@ -1892,7 +1892,7 @@ static struct option g_options[] = {
 #define FSDEVPERF_OPT_FILESIZE 'f'
 	{ "filesize", required_argument, NULL, FSDEVPERF_OPT_FILESIZE },
 #define FSDEVPERF_OPT_UNIQUE 'U'
-	{ "unique", no_argument, NULL, FSDEVPERF_OPT_UNIQUE },
+	{ "unique", optional_argument, NULL, FSDEVPERF_OPT_UNIQUE },
 #define FSDEVPERF_OPT_SIZE 0x1000
 	{ "size", required_argument, NULL, FSDEVPERF_OPT_SIZE },
 #define FSDEVPERF_OPT_NRFILES 0x1001
@@ -1997,6 +1997,16 @@ error:
 	return rc;
 }
 
+static bool
+fsdevperf_parse_bool_option(char *arg)
+{
+	if (arg == NULL) {
+		return true;
+	}
+
+	return strcmp(arg, "0") != 0 && strcasecmp(arg, "false") != 0;
+}
+
 static int
 fsdevperf_job_parse_option(struct fsdevperf_job *job, int ch, char *arg)
 {
@@ -2037,7 +2047,9 @@ fsdevperf_job_parse_option(struct fsdevperf_job *job, int ch, char *arg)
 		g_app.rpc.enabled = true;
 		break;
 	case FSDEVPERF_OPT_UNIQUE:
-		job->flags |= FSDEVPERF_JOB_UNIQUE_DATA;
+		if (fsdevperf_parse_bool_option(arg)) {
+			job->flags |= FSDEVPERF_JOB_UNIQUE_DATA;
+		}
 		break;
 	case FSDEVPERF_OPT_IOSIZE:
 	case FSDEVPERF_OPT_IODEPTH:
