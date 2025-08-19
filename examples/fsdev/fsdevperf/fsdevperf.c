@@ -126,6 +126,7 @@ struct fsdevperf_job_ops {
 #define FSDEVPERF_JOB_SINGLE_BUFFER	(1 << 1)
 #define FSDEVPERF_JOB_UNIQUE_DATA	(1 << 2)
 #define FSDEVPERF_JOB_INTERNAL		(1 << 3)
+#define FSDEVPERF_JOB_DIRECT		(1 << 4)
 
 struct fsdevperf_job {
 	int				io_pattern;
@@ -1354,6 +1355,7 @@ static void
 fsdevperf_task_lookup_cb(void *cb_arg, int status, struct spdk_fsdev_io *fsdev_io)
 {
 	struct fsdevperf_task *task = cb_arg;
+	struct fsdevperf_job *job = task->job;
 	struct fsdevperf_filesystem *fs = task->fs;
 	struct fsdevperf_file *file = task->file;
 	struct spdk_fsdev *fsdev = spdk_fsdev_desc_get_fsdev(fs->fsdev_desc);
@@ -1402,6 +1404,9 @@ fsdevperf_task_lookup_cb(void *cb_arg, int status, struct spdk_fsdev_io *fsdev_i
 
 	fsdev_io->u_in.open.fobject = file->fobj;
 	fsdev_io->u_in.open.flags = O_RDWR;
+	if (job->flags & FSDEVPERF_JOB_DIRECT) {
+		fsdev_io->u_in.open.flags |= O_DIRECT;
+	}
 
 	spdk_fsdev_io_submit(fsdev_io);
 }
@@ -1899,6 +1904,8 @@ static struct option g_options[] = {
 	{ "nrfiles", required_argument, NULL, FSDEVPERF_OPT_NRFILES },
 #define FSDEVPERF_OPT_NRTHREADS 0x1002
 	{ "nrthreads", required_argument, NULL, FSDEVPERF_OPT_NRTHREADS },
+#define FSDEVPERF_OPT_DIRECT 0x1003
+	{ "direct", optional_argument, NULL, FSDEVPERF_OPT_DIRECT },
 	{},
 };
 
@@ -2051,6 +2058,11 @@ fsdevperf_job_parse_option(struct fsdevperf_job *job, int ch, char *arg)
 			job->flags |= FSDEVPERF_JOB_UNIQUE_DATA;
 		}
 		break;
+	case FSDEVPERF_OPT_DIRECT:
+		if (fsdevperf_parse_bool_option(arg)) {
+			job->flags |= FSDEVPERF_JOB_DIRECT;
+		}
+		break;
 	case FSDEVPERF_OPT_IOSIZE:
 	case FSDEVPERF_OPT_IODEPTH:
 	case FSDEVPERF_OPT_SIZE:
@@ -2122,6 +2134,7 @@ fsdevperf_usage(void)
 	printf("     --nrfiles=<nrfiles>              number of files to send I/O to on each thread\n");
 	printf(" -U, --unique                         generate unique data for each I/O\n");
 	printf("     --nrthreads=<count>              spawn <count> threads on each core\n");
+	printf("     --direct                         use direct I/O\n");
 }
 
 int
