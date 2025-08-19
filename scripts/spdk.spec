@@ -39,6 +39,7 @@ Source0:        spdk-%{pkg_ver}.tar.gz
 
 %if %{defined ctyunos}
 %define python_ver 3.9
+BuildRequires: libxlio-devel
 %endif
 
 %if %{defined python3_version}
@@ -68,7 +69,7 @@ BuildRequires: numactl-devel
 BuildRequires: libiscsi-devel
 
 # SPDK build dependencies
-BuildRequires:	make gcc gcc-c++
+BuildRequires:	make gcc gcc-c++ automake autoconf, libtool
 BuildRequires:	CUnit-devel, libaio-devel, openssl-devel, libuuid-devel 
 BuildRequires:	libiscsi-devel
 
@@ -103,7 +104,7 @@ Requires: %{name}%{?_isa} = %{package_version} python3 python3-pexpect
 
 %if 0%{?rhel} > 7 || %{defined openEuler} || %{defined ctyunos}
 Requires: python3-configshell
-BuildRequires: python3-configshell
+BuildRequires: python3-configshell python3-pyelftools
 %endif
 
 %description
