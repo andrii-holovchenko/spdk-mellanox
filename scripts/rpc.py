@@ -3771,7 +3771,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                    required=False, type=int)
     p.add_argument('-c', '--complete', help='Completion delay in microseconds (default 0: disabled)',
                    required=False, type=int)
-    p.add_argument('-n', '--complete-99', help='99% Completion delay in microseconds (default 0: disabled)',
+    p.add_argument('-n', '--complete-99', help='99%% Completion delay in microseconds (default 0: disabled)',
                    required=False, type=int)
     p.set_defaults(func=fsdev_set_delays)
 
