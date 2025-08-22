@@ -1758,7 +1758,7 @@ nvmf_tcp_qpair_sock_init(struct spdk_nvmf_tcp_qpair *tqpair)
 		return rc;
 	}
 	/* update buffer size for owner when changing format or arguments here */
-	snprintf(owner, sizeof(owner), "%s:%d", caddr, cport);
+	snprintf(owner, sizeof(owner), "%s:%hu", caddr, cport);
 	tqpair->qpair.trace_id = spdk_trace_register_owner(OWNER_TYPE_NVMF_TCP, owner);
 	spdk_trace_record(TRACE_TCP_QP_SOCK_INIT, tqpair->qpair.trace_id, 0, 0);
 
