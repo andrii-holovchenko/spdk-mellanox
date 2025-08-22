@@ -42,7 +42,7 @@ def add_parser(subparsers):
 
     def save_config(args):
         rpc.save_config(args.client,
-                        sys.stdout,
+                        args.output,
                         indent=args.indent,
                         subsystems=args.subsystems)
 
@@ -51,6 +51,7 @@ def add_parser(subparsers):
     p.add_argument('-i', '--indent', help="""Indent level. Value less than 0 mean compact mode. Default indent level is 2.
     """, type=int, default=2)
     p.add_argument('-s', '--subsystems', help="""Comma-separated list of subsystems (and their dependencies) to save""")
+    p.add_argument('-o', '--output', help="""Output file. By default, output to stdout.""", default=sys.stdout)
     p.set_defaults(func=save_config)
 
     def load_config(args):
@@ -297,6 +298,20 @@ def add_parser(subparsers):
     entry contain (unsorted) array of subsystems it depends on.""")
     p.set_defaults(func=framework_get_subsystems)
 
+    def framework_disable_subsystem(args):
+        print_dict(rpc.subsystem.framework_disable_subsystem(args.client, args.name))
+
+    p = subparsers.add_parser('framework_disable_subsystem', help="""Disable a subsystem so that it does not consume resources""")
+    p.add_argument('name', help='Name of subsystem to disable')
+    p.set_defaults(func=framework_disable_subsystem)
+
+    def framework_enable_subsystem(args):
+        print_dict(rpc.subsystem.framework_enable_subsystem(args.client, args.name))
+
+    p = subparsers.add_parser('framework_enable_subsystem', help="""Enable a subsystem that was previously disabled""")
+    p.add_argument('name', help='Name of subsystem to enable')
+    p.set_defaults(func=framework_enable_subsystem)
+
     def framework_get_config(args):
         print_dict(rpc.subsystem.framework_get_config(args.client, args.name))
 
@@ -364,19 +379,40 @@ def add_parser(subparsers):
     def mlx5_scan_accel_module(args):
         rpc.mlx5.mlx5_scan_accel_module(args.client,
                                         qp_size=args.qp_size,
+                                        cq_size=args.cq_size,
                                         num_requests=args.num_requests,
-                                        allowed_devs=args.allowed_devs,
                                         crypto_split_blocks=args.crypto_split_blocks,
-                                        enable_driver=args.enable_driver)
+                                        allowed_devs=args.allowed_devs,
+                                        merge=args.merge,
+                                        qp_per_domain=args.qp_per_domain,
+                                        enable_driver=args.enable_driver,
+                                        enable_module=args.enable_module,
+                                        disable_signature=args.disable_signature,
+                                        disable_crypto=args.disable_crypto)
 
     p = subparsers.add_parser('mlx5_scan_accel_module', help='Enable mlx5 accel module.')
     p.add_argument('-q', '--qp-size', type=int, help='QP size')
+    p.add_argument('-c', '--cq-size', type=int, help='CQ size')
     p.add_argument('-r', '--num-requests', type=int, help='Size of the shared requests pool')
+    p.add_argument('-s', '--split-mb-blocks', type=int, dest='crypto_split_blocks',
+                   help="Number of data blocks to be processed in 1 crypto UMR. DEPRECATED, use --crypto-split-blocks")
+    p.add_argument('--crypto-split-blocks', type=int, dest='crypto_split_blocks',
+                   help="Number of data blocks to be processed in 1 crypto UMR.")
     p.add_argument('-d', '--allowed-devs', help="Comma separated list of allowed device names, e.g. mlx5_0,mlx5_1")
-    p.add_argument('-s', '--crypto-split-blocks', type=int,
-                   help="Number of data blocks to be processed in 1 crypto UMR. [0-65535], 0 means no limit")
+    p.add_argument('--allowed-crypto-devs', dest='allowed_devs', help="[DEPRECATED] Comma separated list of allowed crypto device names")
+    p.add_argument('-m', '--merge', dest='merge', action='store_true', help="Merge tasks in the sequence when possible", default=None,)
+    p.add_argument('-f', '--qp-per-domain', dest='qp_per_domain', action='store_true', default=True,
+                   help="Use dedicated qpair per memory domain per channel")
+    p.add_argument('-n', '--qp-per-channel', dest='qp_per_domain', action='store_false', default=None,
+                   help="Use single QP per channel")
     p.add_argument('-e', '--enable-driver', dest='enable_driver', action='store_true', default=None,
-                   help="Enable mlx5 platform driver. Note: the driver supports reduced scope of operations, enable with care")
+                   help="Enable accel mlx5 platform driver")
+    p.add_argument('--disable-module', dest='enable_module', action='store_false', default=None,
+                   help="Disable accel mlx5 module")
+    p.add_argument('--disable-signature', dest='disable_signature', action='store_true', default=None,
+                   help="Disable signature operations support")
+    p.add_argument('--disable-crypto', dest='disable_crypto', action='store_true', default=None,
+                   help="Disable crypto operations support")
     p.set_defaults(func=mlx5_scan_accel_module)
 
     def accel_mlx5_dump_stats(args):
@@ -662,3 +698,70 @@ def add_parser(subparsers):
     p.add_argument('name', help='DAOS bdev name')
     p.add_argument('new_size', help='new bdev size for resize operation. The unit is MiB')
     p.set_defaults(func=bdev_daos_resize)
+
+    def rmem_get_config(args):
+        print_json(rpc.rmem.rmem_get_config(args.client))
+
+    p = subparsers.add_parser('rmem_get_config', help='Get the rmem config')
+    p.set_defaults(func=rmem_get_config)
+
+    def rmem_set_config(args):
+        print_json(rpc.rmem.rmem_set_config(args.client, backend_dir=args.backend_dir))
+
+    p = subparsers.add_parser('rmem_set_config', help='Set configuration parameters for rmem')
+    p.add_argument('-d', '--backend-dir', help="Directory where rmem stores backend files", required=True)
+    p.set_defaults(func=rmem_set_config)
+
+    def rdma_provider_get_opts(args):
+        print_dict(rpc.rdma_provider.rdma_provider_get_opts(args.client))
+
+    p = subparsers.add_parser('rdma_provider_get_opts', help='Get RDMA provider options')
+    p.set_defaults(func=rdma_provider_get_opts)
+
+    def rdma_provider_set_opts(args):
+        rpc.rdma_provider.rdma_provider_set_opts(args.client, support_offload_on_qp=args.support_offload_on_qp)
+
+    p = subparsers.add_parser('rdma_provider_set_opts', help='Set RDMA provider options.')
+    p.add_argument('--enable-offload-on-qp', dest='support_offload_on_qp', action='store_true', default=None,
+                   help="Enable HW offloads on network QP")
+    p.add_argument('--disable-offload-on-qp', dest='support_offload_on_qp', action='store_false', default=None,
+                   help="Enable HW offloads on network QP")
+    p.set_defaults(func=rdma_provider_set_opts)
+
+    def fuse_set_options(args):
+        rpc.fuse.fuse_set_options(args.client, max_xfer_size=args.max_xfer_size,
+                                  max_io_depth=args.max_io_depth, clone_fd=args.clone_fd,
+                                  fstype=args.fstype)
+    p = subparsers.add_parser('fuse_set_options', help='Set FUSE library options')
+    p.add_argument('--max-io-depth', type=int, help='Maximum I/O depth on each core per mount')
+    p.add_argument('--max-xfer-size', type=int, help='Maximum transfer size')
+    p.add_argument('--no-clone', help='Use the same /dev/fuse fd on all cores',
+                   dest='clone_fd', action='store_false')
+    p.add_argument('--fstype', help='Override filesystem type passed to mount(2)')
+    p.set_defaults(func=fuse_set_options)
+
+    def fuse_mount(args):
+        rpc.fuse.fuse_mount(args.client, fsdev=args.fsdev, mountpoint=args.mountpoint,
+                            max_xfer_size=args.max_xfer_size, max_io_depth=args.max_io_depth,
+                            clone_fd=args.clone_fd, fstype=args.fstype, options=args.options)
+    p = subparsers.add_parser('fuse_mount', help='Mount fsdev via FUSE')
+    p.add_argument('fsdev', metavar='FSDEV', help='Name of the fsdev to mount')
+    p.add_argument('mountpoint', metavar='MOUNTPOINT', help='Directory where to mount the fsdev')
+    p.add_argument('--max-io-depth', type=int, help='Maximum I/O depth on each core per mount')
+    p.add_argument('--max-xfer-size', type=int, help='Maximum transfer size')
+    p.add_argument('--no-clone', help='Use the same /dev/fuse fd on all cores',
+                   dest='clone_fd', action='store_false')
+    p.add_argument('--fstype', help='Override filesystem type passed to mount(2)')
+    p.add_argument('-o', '--options', help='Comma-separated list of mount(2) options')
+    p.set_defaults(func=fuse_mount)
+
+    def fuse_umount(args):
+        rpc.fuse.fuse_umount(args.client, mount=args.mount)
+    p = subparsers.add_parser('fuse_umount', help='Mount fsdev via FUSE')
+    p.add_argument('mount', metavar='MOUNT', help='Mountpoint/fsdev to unmount')
+    p.set_defaults(func=fuse_umount)
+
+    def fuse_get_mounts(args):
+        print_dict(rpc.fuse.fuse_get_mounts(args.client))
+    p = subparsers.add_parser('fuse_get_mounts', help='List existings fsdev mounts')
+    p.set_defaults(func=fuse_get_mounts)

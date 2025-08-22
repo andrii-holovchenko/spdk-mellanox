@@ -43,7 +43,10 @@ def add_parser(subparsers):
                                   bdev_io_cache_size=args.bdev_io_cache_size,
                                   bdev_auto_examine=args.bdev_auto_examine,
                                   iobuf_small_cache_size=args.iobuf_small_cache_size,
-                                  iobuf_large_cache_size=args.iobuf_large_cache_size)
+                                  iobuf_large_cache_size=args.iobuf_large_cache_size,
+                                  qos_io_slice=args.qos_io_slice,
+                                  qos_byte_slice=args.qos_byte_slice,
+                                  qos_timeslice_us=args.qos_timeslice_us)
 
     p = subparsers.add_parser('bdev_set_options',
                               help="""Set options of bdev subsystem""")
@@ -54,6 +57,9 @@ def add_parser(subparsers):
     group.add_argument('-d', '--disable-auto-examine', dest='bdev_auto_examine', help='Not allow to auto examine', action='store_false')
     p.add_argument('--iobuf-small-cache-size', help='Size of the small iobuf per thread cache', type=int)
     p.add_argument('--iobuf-large-cache-size', help='Size of the large iobuf per thread cache', type=int)
+    p.add_argument('--qos-io-slice', help='QoS IO slice allocated from global pool to local cache', type=int)
+    p.add_argument('--qos-byte-slice', help='QoS byte slice allocated from global pool to local cache', type=int)
+    p.add_argument('--qos-timeslice-us', help='QoS timeslice in microseconds', type=int)
     p.set_defaults(bdev_auto_examine=True)
     p.set_defaults(func=bdev_set_options)
 
@@ -242,7 +248,10 @@ def add_parser(subparsers):
                                                md_interleave=args.md_interleave,
                                                dif_type=args.dif_type,
                                                dif_is_head_of_md=args.dif_is_head_of_md,
-                                               dif_pi_format=args.dif_pi_format))
+                                               dif_pi_format=args.dif_pi_format,
+                                               enable_io_channel_weight=args.enable_io_channel_weight,
+                                               disable_accel_support=args.disable_accel_support,
+                                               disable_verify_pi=args.disable_verify_pi))
     p = subparsers.add_parser('bdev_malloc_create', help='Create a bdev with malloc backend')
     p.add_argument('-b', '--name', help="Name of the bdev")
     p.add_argument('-u', '--uuid', help="UUID of the bdev (optional)")
@@ -264,6 +273,9 @@ def add_parser(subparsers):
     p.add_argument('-f', '--dif-pi-format', type=int, choices=[0, 1, 2],
                    help='Protection infromation format. Parameter --dif-type needs to be set together.'
                         '0=16b Guard PI, 1=32b Guard PI, 2=64b Guard PI. Default=0.')
+    p.add_argument('--enable-io-channel-weight', action='store_true', help='Enable IO channel weight')
+    p.add_argument('--disable-accel-support', action='store_true', help='Don\'t report support of accel sequence')
+    p.add_argument('--disable-verify-pi', action='store_true', help='Disable T10 PI verification')
     p.set_defaults(func=bdev_malloc_create)
 
     def bdev_malloc_delete(args):
@@ -288,7 +300,8 @@ def add_parser(subparsers):
                                              md_size=args.md_size,
                                              dif_type=args.dif_type,
                                              dif_is_head_of_md=args.dif_is_head_of_md,
-                                             dif_pi_format=args.dif_pi_format))
+                                             dif_pi_format=args.dif_pi_format,
+                                             zero_copy=args.zero_copy))
 
     p = subparsers.add_parser('bdev_null_create', help='Add a bdev with null backend')
     p.add_argument('name', help='Block device name')
@@ -306,6 +319,8 @@ def add_parser(subparsers):
     p.add_argument('-f', '--dif-pi-format', type=int, choices=[0, 1, 2],
                    help='Protection infromation format. Parameter --dif-type needs to be set together.'
                         '0=16b Guard PI, 1=32b Guard PI, 2=64b Guard PI. Default=0.')
+    p.add_argument('-z', '--zero-copy', nargs='?', default=None, const="",
+                   help='Enable Zero-copy, use given IB device or leave empty to use default')
     p.set_defaults(func=bdev_null_create)
 
     def bdev_null_delete(args):
@@ -492,7 +507,10 @@ def add_parser(subparsers):
                    action='store_true')
     p.add_argument('--allow-accel-sequence',
                    help='''Allow NVMe bdevs to advertise support for accel sequences if the
-                   controller also supports them.''', action='store_true')
+                   controller also supports them.''', action='store_true', dest='allow_accel_sequence', default=None)
+    p.add_argument('--disallow-accel-sequence',
+                   help='''Disallow NVMe bdevs to advertise support for accel sequences even if the controller supports them''',
+                   action='store_false', dest='allow_accel_sequence')
     p.add_argument('--rdma-max-cq-size',
                    help='The maximum size of a rdma completion queue. Default: 0 (unlimited)', type=int)
     p.add_argument('--rdma-cm-event-timeout-ms',
@@ -501,6 +519,10 @@ def add_parser(subparsers):
                    type=lambda d: d.split(','))
     p.add_argument('--dhchap-dhgroups', help='Comma-separated list of allowed DH-HMAC-CHAP DH groups',
                    type=lambda d: d.split(','))
+    p.add_argument('--poll-group-requests',
+                   help='The number of requests allocated for each NVMe poll group. Default: 0', type=int)
+    p.add_argument('--small-cache-size', help='The number of small iobuf elements in cache. Default: 128', type=int)
+    p.add_argument('--large-cache-size', help='The number of large iobuf elements in cache. Default: 128', type=int)
     p.add_argument('--enable-rdma-umr-per-io',
                    help='''Enable scatter-gather RDMA Memory Region per IO if supported by the system.''',
                    action='store_true', dest='rdma_umr_per_io')
@@ -1043,12 +1065,14 @@ def add_parser(subparsers):
         print_json(rpc.bdev.bdev_passthru_create(args.client,
                                                  base_bdev_name=args.base_bdev_name,
                                                  name=args.name,
-                                                 uuid=args.uuid))
+                                                 uuid=args.uuid,
+                                                 hide_metadata=args.hide_metadata))
 
     p = subparsers.add_parser('bdev_passthru_create', help='Add a pass through bdev on existing bdev')
     p.add_argument('-b', '--base-bdev-name', help="Name of the existing bdev", required=True)
     p.add_argument('-p', '--name', help="Name of the pass through bdev", required=True)
     p.add_argument('-u', '--uuid', help="UUID of the bdev")
+    p.add_argument('-N', '--hide-metadata', help='Enable hide_metadata option to the base bdev (optional)', action='store_true')
     p.set_defaults(func=bdev_passthru_create)
 
     def bdev_passthru_delete(args):
@@ -1147,14 +1171,14 @@ def add_parser(subparsers):
                    help='R/W IOs per second limit (>=1000, example: 20000). 0 means unlimited.',
                    type=int)
     p.add_argument('--rw-mbytes-per-sec',
-                   help="R/W megabytes per second limit (>=1, example: 100). 0 means unlimited.",
-                   type=int)
+                   help="R/W mebibytes per second limit (>=10, example: 100). 0 means unlimited.",
+                   type=int, required=False)
     p.add_argument('--r-mbytes-per-sec',
-                   help="Read megabytes per second limit (>=1, example: 100). 0 means unlimited.",
-                   type=int)
+                   help="Read mebibytes per second limit (>=10, example: 100). 0 means unlimited.",
+                   type=int, required=False)
     p.add_argument('--w-mbytes-per-sec',
-                   help="Write megabytes per second limit (>=1, example: 100). 0 means unlimited.",
-                   type=int)
+                   help="Write mebibytes per second limit (>=10, example: 100). 0 means unlimited.",
+                   type=int, required=False)
     p.set_defaults(func=bdev_set_qos_limit)
 
     def bdev_error_inject_error(args):
@@ -1206,3 +1230,87 @@ def add_parser(subparsers):
                               help='Display health log of the required NVMe bdev controller.')
     p.add_argument('-c', '--name', help="Name of the NVMe bdev controller. Example: Nvme0", required=True)
     p.set_defaults(func=bdev_nvme_get_controller_health_info)
+
+    def bdev_group_create(args):
+        print_json(rpc.bdev.bdev_group_create(args.client, name=args.name))
+
+    p = subparsers.add_parser('bdev_group_create', help='Create a bdev group')
+    p.add_argument('name', help="Name of the bdev group")
+    p.set_defaults(func=bdev_group_create)
+
+    def bdev_group_add_bdev(args):
+        print_json(rpc.bdev.bdev_group_add_bdev(args.client, name=args.name, bdev=args.bdev))
+
+    p = subparsers.add_parser('bdev_group_add_bdev', help='Add a bdev to a group')
+    p.add_argument('name', help="Name of the bdev group")
+    p.add_argument('bdev', help="Name of the bdev")
+    p.set_defaults(func=bdev_group_add_bdev)
+
+    def bdev_group_set_qos_limit(args):
+        rpc.bdev.bdev_group_set_qos_limit(args.client,
+                                          name=args.name,
+                                          rw_ios_per_sec=args.rw_ios_per_sec,
+                                          rw_mbytes_per_sec=args.rw_mbytes_per_sec,
+                                          r_mbytes_per_sec=args.r_mbytes_per_sec,
+                                          w_mbytes_per_sec=args.w_mbytes_per_sec)
+
+    p = subparsers.add_parser('bdev_group_set_qos_limit',
+                              help='Set QoS rate limit on a bdev group')
+    p.add_argument('name', help='bdev group name to set QoS. Example: group0')
+    p.add_argument('--rw-ios-per-sec',
+                   help='R/W IOs per second limit (>=1000, example: 20000). 0 means unlimited.',
+                   type=int, required=False)
+    p.add_argument('--rw-mbytes-per-sec',
+                   help="R/W mebibytes per second limit (>=10, example: 100). 0 means unlimited.",
+                   type=int, required=False)
+    p.add_argument('--r-mbytes-per-sec',
+                   help="Read mebibytes per second limit (>=10, example: 100). 0 means unlimited.",
+                   type=int, required=False)
+    p.add_argument('--w-mbytes-per-sec',
+                   help="Write mebibytes per second limit (>=10, example: 100). 0 means unlimited.",
+                   type=int, required=False)
+    p.set_defaults(func=bdev_group_set_qos_limit)
+
+    def bdev_group_remove_bdev(args):
+        print_json(rpc.bdev.bdev_group_remove_bdev(args.client, name=args.name, bdev=args.bdev))
+
+    p = subparsers.add_parser('bdev_group_remove_bdev', help='Remove a bdev from a group')
+    p.add_argument('name', help="Name of the bdev group")
+    p.add_argument('bdev', help="Name of the bdev")
+    p.set_defaults(func=bdev_group_remove_bdev)
+
+    def bdev_group_delete(args):
+        print_json(rpc.bdev.bdev_group_delete(args.client, name=args.name))
+
+    p = subparsers.add_parser('bdev_group_delete', help='Delete a bdev group')
+    p.add_argument('name', help="Name of the bdev group")
+    p.set_defaults(func=bdev_group_delete)
+
+    def bdev_groups_get(args):
+        print_json(rpc.bdev.bdev_groups_get(args.client, name=args.name))
+
+    p = subparsers.add_parser('bdev_groups_get', help='Get bdev groups info')
+    p.add_argument('-g', '--name', help="Name of the bdev group", required=False)
+    p.set_defaults(func=bdev_groups_get)
+
+    def bdev_group_get_iostat(args):
+        print_dict(rpc.bdev.bdev_group_get_iostat(args.client, name=args.name))
+
+    p = subparsers.add_parser('bdev_group_get_iostat',
+                              help='Display current I/O statistics of all the groupss or specified group.')
+    p.add_argument('-g', '--name', help="Name of the bdev group", required=False)
+    p.set_defaults(func=bdev_group_get_iostat)
+
+    def bdev_set_ro(args):
+        rpc.bdev.bdev_set_ro(args.client, name=args.name)
+
+    p = subparsers.add_parser('bdev_set_ro', help='Set a bdev in a read-only state.')
+    p.add_argument('-n', '--name', help="Name of the bdev")
+    p.set_defaults(func=bdev_set_ro)
+
+    def bdev_set_rw(args):
+        rpc.bdev.bdev_set_rw(args.client, name=args.name)
+
+    p = subparsers.add_parser('bdev_set_rw', help='Set a bdev in a read/write state.')
+    p.add_argument('-n', '--name', help="Name of the bdev")
+    p.set_defaults(func=bdev_set_rw)

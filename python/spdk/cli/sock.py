@@ -32,7 +32,15 @@ def add_parser(subparsers):
                                        enable_zerocopy_send_client=args.enable_zerocopy_send_client,
                                        zerocopy_threshold=args.zerocopy_threshold,
                                        tls_version=args.tls_version,
-                                       enable_ktls=args.enable_ktls)
+                                       enable_ktls=args.enable_ktls,
+                                       flush_batch_timeout=args.flush_batch_timeout,
+                                       flush_batch_iovcnt_threshold=args.flush_batch_iovcnt_threshold,
+                                       flush_batch_bytes_threshold=args.flush_batch_bytes_threshold,
+                                       enable_zerocopy_recv=args.enable_zerocopy_recv,
+                                       enable_tcp_nodelay=args.enable_tcp_nodelay,
+                                       buffers_pool_size=args.buffers_pool_size,
+                                       packets_pool_size=args.packets_pool_size,
+                                       enable_early_init=args.enable_early_init)
 
     p = subparsers.add_parser('sock_impl_set_options', help="""Set options of socket layer implementation""")
     p.add_argument('-i', '--impl', help='Socket implementation name, e.g. posix', required=True)
@@ -64,6 +72,29 @@ def add_parser(subparsers):
     p.set_defaults(func=sock_impl_set_options, enable_recv_pipe=None, enable_quickack=None,
                    enable_placement_id=None, enable_zerocopy_send_server=None, enable_zerocopy_send_client=None,
                    zerocopy_threshold=None, tls_version=None, enable_ktls=None)
+    p.add_argument('--flush-batch-timeout', help='Set flush_batch_timeout (microseconds) for queuing more requests in a batch', type=int)
+    p.add_argument('--flush-batch-iovcnt-threshold', help='Set flush_batch_iovcnt_threshold for flushing requests', type=int)
+    p.add_argument('--flush-batch-bytes-threshold', help='Set flush_batch_bytes_threshold for flushing requests', type=int)
+    p.add_argument('--enable-zerocopy-recv', help='Enable zerocopy on receive',
+                   action='store_true', dest='enable_zerocopy_recv')
+    p.add_argument('--disable-zerocopy-recv', help='Disable zerocopy on receive',
+                   action='store_false', dest='enable_zerocopy_recv')
+    p.add_argument('--enable-tcp-nodelay', help='Enable TCP_NODELAY option',
+                   action='store_true', dest='enable_tcp_nodelay')
+    p.add_argument('--disable-tcp-nodelay', help='Disable TCP_NODELAY',
+                   action='store_false', dest='enable_tcp_nodelay')
+    p.add_argument('--buffers-pool-size', help='Set per poll group socket buffers pool size', type=int)
+    p.add_argument('--packets-pool-size', help='Set per poll group packets pool size', type=int)
+    p.add_argument('--enable-early-init', help='Enable early initialization',
+                   action='store_true', dest='enable_early_init')
+    p.add_argument('--disable-early-init', help='Disable early initialization',
+                   action='store_false', dest='enable_early_init')
+    p.set_defaults(func=sock_impl_set_options, enable_recv_pipe=None, enable_quickack=None,
+                   enable_placement_id=None, enable_zerocopy_send_server=None, enable_zerocopy_send_client=None,
+                   flush_batch_timeout=None, flush_batch_iovcnt_threshold=None, flush_batch_bytes_threshold=None,
+                   zerocopy_threshold=None, tls_version=None, enable_ktls=None, psk_key=None, psk_identity=None,
+                   enable_zerocopy_recv=None, enable_tcp_nodelay=None, buffers_pool_size=None, packets_pool_size=None,
+                   enable_early_init=None)
 
     def sock_set_default_impl(args):
         print_json(rpc.sock.sock_set_default_impl(args.client,
