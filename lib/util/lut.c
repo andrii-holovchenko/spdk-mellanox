@@ -40,6 +40,7 @@ SPDK_STATIC_ASSERT(sizeof(struct spdk_lut_node) == 16, "Incorrect size");
 struct spdk_lut {
 	struct spdk_lut_node *nodes;
 	uint64_t num_nodes;
+	uint64_t init_size;
 	uint64_t growth_step;
 	uint64_t max_size;
 	STAILQ_HEAD(, spdk_lut_node) free_nodes;
@@ -92,6 +93,36 @@ lut_make_2mb_multiple(uint64_t size)
 	return size;
 }
 
+static int
+lut_init(struct spdk_lut *lut)
+{
+	int rc;
+
+	assert(STAILQ_EMPTY(&lut->free_nodes));
+	assert(lut->nodes == NULL);
+
+	/* Reserve address space to handle the maximum size, but do not populate it with memory yet. */
+	lut->nodes = mmap(NULL, lut->max_size * sizeof(struct spdk_lut_node),
+			  PROT_NONE,
+			  MAP_PRIVATE | MAP_ANONYMOUS,
+			  -1, 0);
+	if (lut->nodes == MAP_FAILED) {
+		rc = errno;
+		SPDK_ERRLOG("Failed to create memory mapping for lut. rc: %d\n", rc);
+		return -rc;
+	}
+
+	/* Populate the initial part of the array. */
+	rc = lut_extend(lut, lut->init_size);
+	if (rc != 0) {
+		munmap(lut->nodes, lut->max_size * sizeof(struct spdk_lut_node));
+		lut->nodes = NULL;
+		return rc;
+	}
+
+	return 0;
+}
+
 struct spdk_lut *
 spdk_lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size)
 {
@@ -118,24 +149,12 @@ spdk_lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size)
 	}
 
 	STAILQ_INIT(&lut->free_nodes);
+	lut->init_size = init_size;
 	lut->max_size = max_size;
 	lut->growth_step = growth_step;
 
-	/* Reserve address space to handle the maximum size, but do not populate it with memory yet. */
-	lut->nodes = mmap(NULL, max_size * sizeof(struct spdk_lut_node),
-			  PROT_NONE,
-			  MAP_PRIVATE | MAP_ANONYMOUS,
-			  -1, 0);
-	if (lut->nodes == MAP_FAILED) {
-		SPDK_ERRLOG("Failed to create memory mapping for lut. rc: %d\n", errno);
-		free(lut);
-		return NULL;
-	}
-
-	/* Populate the initial part of the array. */
-	rc = lut_extend(lut, init_size);
+	rc = lut_init(lut);
 	if (rc != 0) {
-		munmap(lut->nodes, max_size);
 		free(lut);
 		return NULL;
 	}
