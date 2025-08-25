@@ -113,6 +113,7 @@ function confirm_abi_deps() {
 	local abidiff_output
 	local release
 	local suppression_file="$testdir/abigail_suppressions.ini"
+	local lts
 
 	release="${RELEASE:-$(get_release)}.x"
 
@@ -127,6 +128,7 @@ function confirm_abi_deps() {
 		return 1
 	fi
 
+	lts=$(readlink -f "$source_abi_dir/LTS") lts="${lts##*/}"
 	echo "* Running ${FUNCNAME[0]} against the ${release%.*} release" >&2
 
 	if ! hash abidiff; then
@@ -242,7 +244,7 @@ function confirm_abi_deps() {
 
 			if [[ $so_name_changed == yes ]]; then
 				# All SO major versions are intentionally increased after LTS to allow SO minor changes during the supported period.
-				if [[ "$release" == "$(get_release LTS).x" ]]; then
+				if [[ "$release" == "$lts" ]]; then
 					found_abi_change=true
 				fi
 				if ! $found_abi_change; then
