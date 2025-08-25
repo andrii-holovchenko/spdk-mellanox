@@ -1309,6 +1309,11 @@ fsdev_aio_do_umount(struct aio_fsdev *vfsdev)
 #endif
 
 	fsdev_free_leafs(vfsdev->root, false);
+
+	/* Reset removes the root from the LUT, so we re-insert it after the reset */
+	assert(vfsdev->root->hdr.lut_key == 0); /* The root should be the first element in the LUT */
+	spdk_lut_reset(vfsdev->lut);
+	spdk_lut_insert_at(vfsdev->lut, vfsdev->root, vfsdev->root->hdr.lut_key);
 }
 
 static int
