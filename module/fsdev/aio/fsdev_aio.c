@@ -1317,6 +1317,8 @@ fsdev_aio_op_mount(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 	struct aio_fsdev *vfsdev = fsdev_to_aio_fsdev(fsdev_io->fsdev);
 	struct spdk_fsdev_mount_opts *in_opts = &fsdev_io->u_in.mount.opts;
 
+	fsdev_aio_do_umount(vfsdev);
+
 	fsdev_io->u_out.mount.opts = *in_opts;
 	fsdev_aio_set_mount_opts(vfsdev, &fsdev_io->u_out.mount.opts);
 
