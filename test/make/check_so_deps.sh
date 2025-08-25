@@ -104,7 +104,7 @@ function get_release() {
 	fi
 
 	tag=$(git describe --tags --abbrev=0 --exclude=LTS --exclude="*-pre" $version)
-	echo "${tag:0:8}"
+	echo "${tag:0:6}"
 }
 
 function confirm_abi_deps() {
