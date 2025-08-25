@@ -1299,6 +1299,18 @@ fsdev_aio_fanotify_poller(void *ctx)
 
 #endif /* SPDK_CONFIG_HAVE_FANOTIFY */
 
+static void
+fsdev_aio_do_umount(struct aio_fsdev *vfsdev)
+{
+#ifdef SPDK_CONFIG_HAVE_FANOTIFY
+	if (vfsdev->fanotify_fd != -1) {
+		fsdev_aio_fanotify_remove(vfsdev->root);
+	}
+#endif
+
+	fsdev_free_leafs(vfsdev->root, false);
+}
+
 static int
 fsdev_aio_op_mount(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 {
@@ -1331,13 +1343,7 @@ fsdev_aio_op_umount(struct spdk_io_channel *ch, struct spdk_fsdev_io *fsdev_io)
 {
 	struct aio_fsdev *vfsdev = fsdev_to_aio_fsdev(fsdev_io->fsdev);
 
-#ifdef SPDK_CONFIG_HAVE_FANOTIFY
-	if (vfsdev->fanotify_fd != -1) {
-		fsdev_aio_fanotify_remove(vfsdev->root);
-	}
-#endif
-
-	fsdev_free_leafs(vfsdev->root, false);
+	fsdev_aio_do_umount(vfsdev);
 	file_object_unref(vfsdev->root, 1);
 
 	return 0;
