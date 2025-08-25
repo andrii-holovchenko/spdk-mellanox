@@ -116,6 +116,18 @@ int spdk_lut_foreach(struct spdk_lut *lut, spdk_lut_foreach_cb cb_fn, void *cb_a
 int spdk_lut_remove(struct spdk_lut *lut, uint64_t key);
 
 /**
+ * Reset the LUT.
+ *
+ * \param lut LUT object.
+ *
+ * \return 0 on success, a negative error code otherwise.
+ *
+ * \note This function removes all currently inserted elements from the LUT.
+ * \note This function is not thread safe. It should be called while no other threads are accessing the LUT.
+ */
+int spdk_lut_reset(struct spdk_lut *lut);
+
+/**
  * Destroy LUT
  *
  * \param lut LUT object.

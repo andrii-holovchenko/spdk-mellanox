@@ -216,6 +216,7 @@
 	spdk_lut_insert_at;
 	spdk_lut_get;
 	spdk_lut_foreach;
+	spdk_lut_reset;
 	spdk_lut_remove;
 	spdk_lut_free;
 

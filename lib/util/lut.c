@@ -270,6 +270,20 @@ spdk_lut_foreach(struct spdk_lut *lut, spdk_lut_foreach_cb cb_fn, void *cb_arg)
 }
 
 int
+spdk_lut_reset(struct spdk_lut *lut)
+{
+	/* Reset the free nodes list */
+	STAILQ_INIT(&lut->free_nodes);
+
+	/* Unmap the current nodes */
+	munmap(lut->nodes, lut->max_size * sizeof(struct spdk_lut_node));
+	lut->nodes = NULL;
+	lut->num_nodes = 0;
+
+	return lut_init(lut);
+}
+
+int
 spdk_lut_remove(struct spdk_lut *lut, uint64_t key)
 {
 	struct spdk_lut_node *node;
