@@ -47,7 +47,7 @@ struct spdk_lut {
 };
 
 static int
-lut_extend(struct spdk_lut *lut, uint64_t size)
+lut_extend(struct spdk_lut *lut, uint64_t size, bool defer_free_node_insertion)
 {
 	struct spdk_lut_node *node;
 	void *placement, *ptr;
@@ -70,8 +70,10 @@ lut_extend(struct spdk_lut *lut, uint64_t size)
 	for (i = lut->num_nodes; i < lut->num_nodes + size; i++) {
 		node = &lut->nodes[i];
 		node->key = i;
-		STAILQ_INSERT_TAIL(&lut->free_nodes, node, u.link);
 		assert(node->u.addr.valid == 0);
+		if (!defer_free_node_insertion) {
+			STAILQ_INSERT_TAIL(&lut->free_nodes, node, u.link);
+		}
 	}
 
 	/* Barrier here so that 'num_nodes' isn't increased before
@@ -94,7 +96,7 @@ lut_make_2mb_multiple(uint64_t size)
 }
 
 static int
-lut_init(struct spdk_lut *lut)
+lut_init(struct spdk_lut *lut, bool defer_free_node_insertion)
 {
 	int rc;
 
@@ -113,7 +115,7 @@ lut_init(struct spdk_lut *lut)
 	}
 
 	/* Populate the initial part of the array. */
-	rc = lut_extend(lut, lut->init_size);
+	rc = lut_extend(lut, lut->init_size, defer_free_node_insertion);
 	if (rc != 0) {
 		munmap(lut->nodes, lut->max_size * sizeof(struct spdk_lut_node));
 		lut->nodes = NULL;
@@ -123,8 +125,9 @@ lut_init(struct spdk_lut *lut)
 	return 0;
 }
 
-struct spdk_lut *
-spdk_lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size)
+static struct spdk_lut *
+lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size,
+	   bool defer_free_node_insertion)
 {
 	struct spdk_lut *lut;
 	int rc;
@@ -153,13 +156,54 @@ spdk_lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size)
 	lut->max_size = max_size;
 	lut->growth_step = growth_step;
 
-	rc = lut_init(lut);
+	rc = lut_init(lut, defer_free_node_insertion);
 	if (rc != 0) {
 		free(lut);
 		return NULL;
 	}
 
 	return lut;
+}
+
+static int
+lut_insert_at(struct spdk_lut *lut, void *value, uint64_t key, bool defer_free_node_insertion)
+{
+	struct spdk_lut_node *node;
+	struct spdk_lut_addr addr;
+
+	assert(key < lut->max_size);
+
+	while (key >= lut->num_nodes) {
+		if (lut_extend(lut, lut->growth_step, defer_free_node_insertion)) {
+			return -ENOMEM;
+		}
+	}
+
+	node = &lut->nodes[key];
+
+	/* Copy the address out of the node in a single load instruction */
+	addr = node->u.addr;
+
+	if (addr.valid) {
+		return -EALREADY;
+	}
+
+	if (!defer_free_node_insertion) {
+		STAILQ_REMOVE(&lut->free_nodes, node, spdk_lut_node, u.link);
+	}
+
+	addr.valid = 1;
+	addr.value = (uint64_t)value;
+
+	node->u.addr = addr;
+
+	return 0;
+}
+
+struct spdk_lut *
+spdk_lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size)
+{
+	return lut_create(init_size, growth_step, max_size, false);
 }
 
 uint64_t
@@ -171,7 +215,7 @@ spdk_lut_insert(struct spdk_lut *lut, void *value)
 		.value = (uint64_t)value
 	};
 
-	if (STAILQ_EMPTY(&lut->free_nodes) && lut_extend(lut, lut->growth_step)) {
+	if (STAILQ_EMPTY(&lut->free_nodes) && lut_extend(lut, lut->growth_step, false)) {
 		return SPDK_LUT_INVALID_KEY;
 	}
 
@@ -186,36 +230,8 @@ spdk_lut_insert(struct spdk_lut *lut, void *value)
 int
 spdk_lut_insert_at(struct spdk_lut *lut, void *value, uint64_t key)
 {
-	struct spdk_lut_node *node;
-	struct spdk_lut_addr addr;
-
-	assert(key < lut->max_size);
-
-	while (key >= lut->num_nodes) {
-		if (lut_extend(lut, lut->growth_step)) {
-			return -ENOMEM;
-		}
-	}
-
-	node = &lut->nodes[key];
-
-	/* Copy the address out of the node in a single load instruction */
-	addr = node->u.addr;
-
-	if (addr.valid) {
-		return -EALREADY;
-	}
-
-	STAILQ_REMOVE(&lut->free_nodes, node, spdk_lut_node, u.link);
-
-	addr.valid = 1;
-	addr.value = (uint64_t)value;
-
-	node->u.addr = addr;
-
-	return 0;
+	return lut_insert_at(lut, value, key, false);
 }
-
 
 void *
 spdk_lut_get(struct spdk_lut *lut, uint64_t key)
@@ -280,7 +296,7 @@ spdk_lut_reset(struct spdk_lut *lut)
 	lut->nodes = NULL;
 	lut->num_nodes = 0;
 
-	return lut_init(lut);
+	return lut_init(lut, false);
 }
 
 int
