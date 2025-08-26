@@ -206,6 +206,43 @@ spdk_lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size)
 	return lut_create(init_size, growth_step, max_size, false);
 }
 
+struct spdk_lut_restore_ctx *
+spdk_lut_restore_begin(uint64_t init_size, uint64_t growth_step, uint64_t max_size)
+{
+	return (struct spdk_lut_restore_ctx *)lut_create(init_size, growth_step, max_size, true);
+}
+
+int
+spdk_lut_restore_insert_at(struct spdk_lut_restore_ctx *ctx, void *value, uint64_t key)
+{
+	struct spdk_lut *lut = (struct spdk_lut *)ctx;
+
+	return lut_insert_at(lut, value, key, true);
+}
+
+struct spdk_lut *
+spdk_lut_restore_end(struct spdk_lut_restore_ctx *ctx, int status)
+{
+	struct spdk_lut *lut = (struct spdk_lut *)ctx;
+	struct spdk_lut_node *node;
+	uint64_t i;
+
+	if (status != 0) {
+		spdk_lut_free(lut);
+		return NULL;
+	}
+
+	/* Create the free nodes list from the nodes which were not inserted into the LUT */
+	for (i = 0; i < lut->num_nodes; i++) {
+		node = &lut->nodes[i];
+		if (!node->u.addr.valid) {
+			STAILQ_INSERT_TAIL(&lut->free_nodes, node, u.link);
+		}
+	}
+
+	return lut;
+}
+
 uint64_t
 spdk_lut_insert(struct spdk_lut *lut, void *value)
 {

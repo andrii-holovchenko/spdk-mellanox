@@ -212,6 +212,9 @@
 
 	# public functions in lut.h
 	spdk_lut_create;
+	spdk_lut_restore_begin;
+	spdk_lut_restore_insert_at;
+	spdk_lut_restore_end;
 	spdk_lut_insert;
 	spdk_lut_insert_at;
 	spdk_lut_get;

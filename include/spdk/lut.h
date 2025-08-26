@@ -61,6 +61,51 @@ typedef int (*spdk_lut_foreach_cb)(void *cb_arg, uint64_t key, void *value);
 struct spdk_lut *spdk_lut_create(uint64_t init_size, uint64_t growth_step, uint64_t max_size);
 
 /**
+ * \brief Context for restoring a LUT.
+ *
+ * This is a context for restoring a LUT.
+ *
+ * It is used for alternative way of creating a LUT - restoring it and inserting elements one by one.
+ * This is useful when specific LUT keys must be assigned to specific values.
+ *
+ * \return Context object on success, NULL otherwise.
+ */
+struct spdk_lut_restore_ctx;
+
+/**
+ * \brief Begin restoring a LUT.
+ *
+ * \param init_size Initial table size.
+ * \param growth_step How the table will grow when there are no more free elements remained.
+ * \param max_size Max table size.
+ *
+ * \return Context object on success, NULL otherwise.
+ */
+struct spdk_lut_restore_ctx *spdk_lut_restore_begin(uint64_t init_size, uint64_t growth_step,
+		uint64_t max_size);
+
+/**
+ * \brief Insert a value into the LUT at a specific key.
+ *
+ * \param ctx Context object.
+ * \param value Value to insert.
+ * \param key Key to insert the element at.
+ *
+ * \return 0 on success, a negative error code otherwise.
+ */
+int spdk_lut_restore_insert_at(struct spdk_lut_restore_ctx *ctx, void *value, uint64_t key);
+
+/**
+ * \brief End restoring a LUT.
+ *
+ * \param ctx Context object.
+ * \param status Status of the restore operation. If non-zero, the function will free the context and return NULL.
+ *
+ * \return LUT object on success, NULL otherwise.
+ */
+struct spdk_lut *spdk_lut_restore_end(struct spdk_lut_restore_ctx *ctx, int status);
+
+/**
  * Insert 'value' into the look up table and return the associated key.
  *
  * \param lut LUT object.
