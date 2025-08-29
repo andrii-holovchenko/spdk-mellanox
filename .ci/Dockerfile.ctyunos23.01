@@ -1,4 +1,6 @@
-FROM dockerhub.nvidia.com/rockylinux:9.2
+# Original CTYUNOS 23.01 image:
+# https://repo.ctyun.cn/hostos/ctyunos-23.01/docker_img/aarch64/ctyunos3-docker-230117-aarch64.tar.xz
+FROM nbu-harbor.gtm.nvidia.com/sw-linux-devops/bfb_builder_ctyunos23.01
 ARG _UID=6213
 ARG _GID=11429
 ARG _LOGIN=swx-jenkins
@@ -7,12 +9,7 @@ ARG MOFED_VER
 ENV LANG=en_US.utf-8
 USER root
 
-RUN yum install -y ca-certificates
-
 RUN yum install -y \
-    epel-release
-
-RUN yum install --enablerepo=crb -y \
     sudo \
     git \
     wget \
@@ -40,10 +37,10 @@ RUN yum install --enablerepo=crb -y \
 RUN set -eux; \
     echo -e "[mlnx_ofed]\n\
 name=Mellanox Technologies \$basearch mlnx_ofed\n\
-baseurl=http://nbu-nfs.gtm.nvidia.com/auto/mswg/release/MLNX_OFED/MLNX_OFED_LINUX-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-rhel9.2-\$basearch/RPMS/\n\
+baseurl=http://nbu-nfs.gtm.nvidia.com/auto/mswg/release/MLNX_OFED/MLNX_OFED_LINUX-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-ctyunos23.01-\$basearch/RPMS/\n\
 enabled=1\n\
 gpgcheck=0" > /etc/yum.repos.d/mellanox_mlnx_ofed.repo; \
-    yum install -y mlnx-ofed-basic-user-only
+    yum install -y mlnx-ofed-basic-user-only libxlio libxlio-devel
 
 RUN pip3 install --prefix=/usr/ pyelftools
 

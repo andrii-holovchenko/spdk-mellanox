@@ -35,9 +35,14 @@ Source0:        spdk-%{pkg_ver}.tar.gz
 %define python_ver 3.9
 %endif
 %else
+%if %{defined openEuler} || %{defined ctyunos}
+%define use_python python3.9
+%define python_ver 3.9
+%else
 # on Fedora 28+ we have python3 == 3.7
 %define use_python python3
 %define python_ver 3.7
+%endif
 %ifarch x86_64
 BuildRequires:  clang-analyzer
 %endif
@@ -62,9 +67,14 @@ BuildRequires: numactl-devel
 BuildRequires: libiscsi-devel
 
 # SPDK build dependencies
-BuildRequires:	make gcc gcc-c++
+BuildRequires:	make gcc gcc-c++ automake autoconf, libtool
 BuildRequires:	CUnit-devel, libaio-devel, openssl-devel, libuuid-devel
 BuildRequires:	libiscsi-devel, fuse3-devel
+
+%if %{defined ctyunos}
+Requires: libxlio
+BuildRequires: libxlio-devel
+%endif
 
 %if 0%{?rhel} >= 8
 # Starting from rhel 8 package name git-core
@@ -95,7 +105,7 @@ Requires: %{name}%{?_isa} = %{package_version} python36
 Requires: %{name}%{?_isa} = %{package_version} python3 python3-pexpect
 %endif
 
-%if 0%{?rhel} > 7 || %{defined openEuler}
+%if 0%{?rhel} > 7 || %{defined openEuler} || %{defined ctyunos}
 Requires: python3-configshell
 BuildRequires: python3-configshell
 %endif
