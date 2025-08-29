@@ -4,30 +4,9 @@
 #  All rights reserved.
 #
 
-get_releasever() {
-
-    # rhel RPM macro should be available in centos >= 7
-    local releasever=$(rpm --eval "%{?rhel}")
-
-    if [ -z $releasever ]; then
-        # OpenEulerOS
-        if [ -f /etc/os-release ]; then
-            source /etc/os-release
-            if [ $ID == "openEuler" ]; then
-                # 20.03
-                if [ $VERSION_ID == "20.03" ]; then
-                    releasever="openEuler-20.03"
-                fi
-            fi
-        fi
-    fi
-
-    echo $releasever
-}
-
 get_os_name() {
-    . /etc/os-release
-    echo "${ID}_${VERSION_ID}"
+    source /etc/os-release
+    echo "${ID}${VERSION_ID}"
 }
 
 upload_deb_urm() {
@@ -42,7 +21,7 @@ upload_deb_urm() {
         echo "INFO: Signing package ${deb_pkg##*/}"
         # Debian 12 doesn't have dpkg-sig, so use debsigs
         case "$(get_os_name)" in
-            debian_12|ubuntu_24.04)
+            debian12|ubuntu24.04)
                 debsigs --sign=origin -k ${gpg_key_name} ${deb_pkg}
                 ;;
             *)
@@ -68,7 +47,7 @@ upload_deb_urm() {
 
 upload_rpm_urm() {
 
-    releasever=$(get_releasever)
+    releasever=$(get_os_name)
     if [ -z $releasever ]; then
         echo "[ERROR]: Unsupported distro. Skip uploading.."
         exit 1
@@ -172,7 +151,9 @@ if [[ -f /etc/debian_version ]]; then
         exit 1
     fi
 
-elif [[ -f /etc/redhat-release || -f /etc/openEuler-release ]]; then
+elif [[ -f /etc/redhat-release || \
+        -f /etc/openEuler-release || \
+        -f /etc/ctyunos-release ]]; then
 
     arch=$(uname -m)
 

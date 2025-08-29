@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM dockerhub.nvidia.com/ubuntu:22.04
 ARG _UID=6213
 ARG _GID=11429
 ARG _LOGIN=swx-jenkins

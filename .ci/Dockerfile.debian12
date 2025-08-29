@@ -1,4 +1,4 @@
-FROM debian:12.1
+FROM dockerhub.nvidia.com/debian:12.1
 ARG _UID=6213
 ARG _GID=11429
 ARG _LOGIN=swx-jenkins
