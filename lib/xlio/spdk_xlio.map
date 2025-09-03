@@ -1,7 +1,6 @@
 {
 	global:
 
-	g_xlio_ops;
 	g_xlio_api;
 	spdk_xlio_init;
 	spdk_xlio_fini;

@@ -9,7 +9,6 @@
 
 #ifndef SPDK_CONFIG_STATIC_XLIO
 static char g_default_xlio_path[] = "libxlio.so";
-struct spdk_sock_xlio_ops g_xlio_ops;
 struct xlio_api_t *g_xlio_api;
 static void *g_xlio_handle;
 #endif
@@ -53,7 +52,6 @@ xlio_unload(void)
 			xlio_exit();
 		}
 
-		memset(&g_xlio_ops, 0, sizeof(g_xlio_ops));
 		rc = dlclose(g_xlio_handle);
 		if (rc) {
 			SPDK_ERRLOG("Closing libxlio failed: rc %d %s\n",
