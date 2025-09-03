@@ -470,6 +470,11 @@ xlio_sock_listen(const char *ip, int port, struct spdk_sock_group_impl *_group,
 	struct addrinfo hints, *res, *res0;
 	int rc;
 
+	if (!spdk_xlio_is_initialized()) {
+		SPDK_ERRLOG("XLIO is not initialized\n");
+		return NULL;
+	}
+
 	assert(opts != NULL);
 	_opts_get_impl_opts(opts, &impl_opts, &g_xlio_impl_opts);
 
@@ -622,6 +627,11 @@ xlio_sock_connect(const char *ip, int port, struct spdk_sock_group_impl *_group,
 	uint16_t src_port;
 	struct addrinfo hints, *res, *res0, *src_ai;
 	int rc;
+
+	if (!spdk_xlio_is_initialized()) {
+		SPDK_ERRLOG("XLIO is not initialized\n");
+		return NULL;
+	}
 
 	if (ip == NULL) {
 		return NULL;
@@ -1307,6 +1317,11 @@ xlio_sock_group_create(void)
 		.socket_accept_cb = spdk_xlio_socket_accept_cb,
 	};
 
+	if (!spdk_xlio_is_initialized()) {
+		SPDK_ERRLOG("XLIO is not initialized\n");
+		return NULL;
+	}
+
 	group = calloc(1, sizeof(*group));
 	if (group == NULL) {
 		return NULL;
@@ -1455,34 +1470,16 @@ xlio_sock_group_close(struct spdk_sock_group_impl *_group)
 	return xlio_poll_group_destroy(group->xlio_group);
 }
 
-static void *
-spdk_xlio_alloc(size_t size)
-{
-	return spdk_zmalloc(size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
-}
-
-static void
-spdk_xlio_free(void *buf)
-{
-	spdk_free(buf);
-}
-
 static int
 xlio_sock_initialize(void)
 {
-	int rc;
-	struct xlio_init_attr iattr = {
-		.flags = 0,
-		.memory_alloc = &spdk_xlio_alloc,
-		.memory_free = &spdk_xlio_free,
-	};
 
-	rc = xlio_init_ex(&iattr);
-	if (rc) {
-		SPDK_ERRLOG("xlio_init rc %d (errno=%d)\n", rc, errno);
+	if (!spdk_xlio_is_initialized()) {
+		SPDK_NOTICELOG("XLIO is not initialized\n");
+		return -ENOTSUP;
 	}
 
-	return rc;
+	return 0;
 }
 
 static struct spdk_net_impl g_xlio_net_impl = {
