@@ -104,7 +104,9 @@ static struct spdk_sock_impl_opts g_xlio_impl_opts = {
 	.psk_identity = NULL,
 	.get_key = NULL,
 	.get_key_ctx = NULL,
-	.tls_cipher_suites = NULL
+	.tls_cipher_suites = NULL,
+	.buffers_pool_size = 4096,
+	.packets_pool_size = 1024,
 };
 
 static pthread_mutex_t g_domain_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -180,6 +182,8 @@ xlio_sock_copy_impl_opts(struct spdk_sock_impl_opts *dest, const struct spdk_soc
 	SET_FIELD(get_key);
 	SET_FIELD(get_key_ctx);
 	SET_FIELD(tls_cipher_suites);
+	SET_FIELD(buffers_pool_size);
+	SET_FIELD(packets_pool_size);
 
 #undef SET_FIELD
 #undef FIELD_OK
