@@ -1201,7 +1201,7 @@ fsdev_aio_set_init_opts(struct aio_fsdev *vfsdev, const struct fuse_init_in *ini
 	init_out->congestion_threshold = 0xffff;
 	init_out->max_write = vfsdev->mount_opts.max_xfer_size;
 	init_out->time_gran = 1;
-	init_out->max_pages = vfsdev->mount_opts.max_xfer_size / PAGE_SIZE;
+	init_out->max_pages = vfsdev->mount_opts.max_xfer_size / 4096;
 
 	if (vfsdev->opts.writeback_cache_enabled && (init_in->flags & FUSE_WRITEBACK_CACHE)) {
 		/* The writeback_cache_enabled was enabled upon creation => we follow the opts */
