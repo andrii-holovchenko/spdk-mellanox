@@ -38,7 +38,7 @@ RUN yum install --enablerepo=devel,powertools -y \
 RUN set -eux; \
     echo -e "[mlnx_ofed]\n\
 name=Mellanox Technologies \$basearch mlnx_ofed\n\
-baseurl=http://nbu-nfs.gtm.nvidia.com/auto/mswg/release/MLNX_OFED/MLNX_OFED_LINUX-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-rhel8.6-\$basearch/RPMS/\n\
+baseurl=http://nbu-nfs.gtm.nvidia.com/auto/mswg/release/MLNX_OFED/MLNX_OFED_LINUX-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-rhel8.8-\$basearch/RPMS/\n\
 enabled=1\n\
 gpgcheck=0" > /etc/yum.repos.d/mellanox_mlnx_ofed.repo; \
     yum install -y mlnx-ofed-basic-user-only
