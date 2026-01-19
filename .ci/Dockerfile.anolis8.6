@@ -7,6 +7,13 @@ ARG MOFED_VER
 ENV LANG=en_US.utf-8
 USER root
 
+RUN set -eux; \
+    echo -e "[mlnx_ofed]\n\
+name=Mellanox Technologies \$basearch mlnx_ofed\n\
+baseurl=http://nbu-nfs.gtm.nvidia.com/auto/mswg/release/MLNX_OFED/MLNX_OFED_LINUX-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-anolis8.6-\$basearch/RPMS/\n\
+enabled=1\n\
+gpgcheck=0" > /etc/yum.repos.d/mellanox_mlnx_ofed.repo
+
 RUN yum install -y ca-certificates
 
 RUN yum install -y \
@@ -35,15 +42,8 @@ RUN yum install -y \
     python3-pip \
     python3-configshell \
     pkgconfig autoconf automake libtool \
-    fuse3-devel patchelf
-
-RUN set -eux; \
-    echo -e "[mlnx_ofed]\n\
-name=Mellanox Technologies \$basearch mlnx_ofed\n\
-baseurl=http://nbu-nfs.gtm.nvidia.com/auto/mswg/release/MLNX_OFED/MLNX_OFED_LINUX-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-anolis8.6-\$basearch/RPMS/\n\
-enabled=1\n\
-gpgcheck=0" > /etc/yum.repos.d/mellanox_mlnx_ofed.repo; \
-    yum install -y mlnx-ofed-basic-user-only
+    fuse3-devel patchelf \
+    mlnx-ofed-basic-user-only
 
 RUN pip3 install --prefix=/usr/ pyelftools
 
